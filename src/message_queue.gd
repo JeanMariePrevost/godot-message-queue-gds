@@ -95,22 +95,44 @@ func is_empty() -> bool:
 
 
 ## Remove all _messages from the queue.
+## Does not affect delayed messages.
 func clear() -> void:
     _messages.clear()
 
 
+## Clears all delayed messages.
+## Does not affect the main queue.
+func clear_delayed_messages() -> void:
+    _delayed_messages.clear()
+
+
 ## Remove all _messages of a given stage from the queue.
-func remove_stage(stage: int) -> void:
+## Does not affect delayed messages.
+func remove_messages_in_stage(stage: int) -> void:
     _messages = _messages.filter(func(m: Message) -> bool: return m.stage != stage)
 
 
+## Remove all delayed messages of a given stage that aren't yet enqueued.
+## Does not affect the main queue.
+func remove_delayed_messages_in_stage(stage: int) -> void:
+    _delayed_messages = _delayed_messages.filter(func(m: Message) -> bool: return m.stage != stage)
+
+
 ## Remove all _messages with a given id from the queue.
+## Does not affect delayed messages.
 func remove_messages_with_id(id: String) -> void:
     _messages = _messages.filter(func(m: Message) -> bool: return m.id != id)
 
 
+## Remove all delayed messages with a given id that aren't yet enqueued.
+## Does not affect the main queue.
+func remove_delayed_messages_with_id(id: String) -> void:
+    _delayed_messages = _delayed_messages.filter(func(m: Message) -> bool: return m.id != id)
+
+
 ## Remove duplicate _messages from the queue, regardless of the deduplication policy.
 ## Can optionally respect the "NEVER" deduplication policy set at the message level.
+## Does not affect delayed messages, which technically aren't part of the queue yet.
 func remove_duplicates(respect_never_policy: bool = false) -> void:
     var seen: Dictionary = {}
     # iterate backwards to safely remove
@@ -124,6 +146,7 @@ func remove_duplicates(respect_never_policy: bool = false) -> void:
 
 ## Remove duplicate _messages with a given id from the queue, regardless of the deduplication policy.
 ## Can optionally respect the "NEVER" deduplication policy set at the message level.
+## Does not affect delayed messages, which technically aren't part of the queue yet.
 func remove_duplicates_with_id(id: String, respect_never_policy: bool = false) -> void:
     var have_nevers_to_keep: bool = false
 
@@ -198,6 +221,14 @@ func peek_stage(stage: int) -> Message:
 ## Note: does not consider other metadata like payload or priority.
 func has_message(id: String) -> bool:
     for message in _messages:
+        if message.id == id:
+            return true
+    return false
+
+
+## Checks whether a message with a given id is in the delayed messages.
+func has_delayed_message(id: String) -> bool:
+    for message in _delayed_messages:
         if message.id == id:
             return true
     return false

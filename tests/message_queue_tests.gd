@@ -588,7 +588,7 @@ func test_queue_stages_after_dequeue() -> GDTestResult:
 
 func test_remove_stage_empty_queue() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.remove_stage(0)
+    queue.remove_messages_in_stage(0)
     return assert_true(queue.is_empty(), "Expected remove_stage on empty queue to have no effect")
 
 
@@ -608,7 +608,7 @@ func test_remove_stage_single_stage() -> GDTestResult:
     queue.enqueue(msg2)
     queue.enqueue(msg3)
 
-    queue.remove_stage(1)
+    queue.remove_messages_in_stage(1)
 
     return assert_true(queue.is_empty(), "Expected remove_stage to remove all messages with stage 1")
 
@@ -633,7 +633,7 @@ func test_remove_stage_multiple_stages() -> GDTestResult:
     queue.enqueue(msg3)
     queue.enqueue(msg4)
 
-    queue.remove_stage(1)
+    queue.remove_messages_in_stage(1)
 
     return assert_true(
         queue.size() == 2 and queue.has_message("msg1") and queue.has_message("msg3") and not queue.has_message("msg2") and not queue.has_message("msg4"),
@@ -646,7 +646,7 @@ func test_remove_stage_nonexistent() -> GDTestResult:
     queue.enqueue(Message.new("msg1"))
     queue.enqueue(Message.new("msg2"))
 
-    queue.remove_stage(99)
+    queue.remove_messages_in_stage(99)
 
     return assert_equal(2, queue.size(), "Expected remove_stage with nonexistent stage to not affect queue")
 
@@ -669,7 +669,7 @@ func test_remove_stage_preserves_order() -> GDTestResult:
     queue.enqueue(msg2)
     queue.enqueue(msg3)
 
-    queue.remove_stage(1)
+    queue.remove_messages_in_stage(1)
 
     var first: Message = queue.dequeue()
     var second: Message = queue.dequeue()
@@ -1324,3 +1324,385 @@ func test_enqueue_after_multiple_mixed_messages() -> GDTestResult:
         ),
         "Expected all mixed message types to be properly enqueued in correct order"
     )
+
+
+# =============================================================================
+# Clear and Remove Functions for Delayed Messages Tests
+# =============================================================================
+
+
+func test_clear_only_main_queue() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.enqueue(Message.new("normal1"))
+    queue.enqueue(Message.new("normal2"))
+    queue.enqueue_after_ms(Message.new("delayed1"), 100)
+    queue.enqueue_after_ms(Message.new("delayed2"), 200)
+
+    queue.clear()
+
+    return assert_true(queue.is_empty(), "Expected main queue to be empty after clear()")
+
+
+func test_clear_including_delayed_messages() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.enqueue(Message.new("normal1"))
+    queue.enqueue(Message.new("normal2"))
+    queue.enqueue_after_ms(Message.new("delayed1"), 100)
+    queue.enqueue_after_ms(Message.new("delayed2"), 200)
+
+    queue.clear()
+    queue.clear_delayed_messages()
+
+    # After clear with delayed messages, wait a frame to verify nothing gets enqueued
+    await Engine.get_main_loop().process_frame
+
+    return assert_true(queue.is_empty(), "Expected both main and delayed queues to be cleared")
+
+
+func test_clear_default_clears_delayed_messages() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.enqueue(Message.new("normal"))
+    queue.enqueue_after_ms(Message.new("delayed"), 100)
+
+    queue.clear()  # Default should clear delayed messages too
+
+    await Engine.get_main_loop().process_frame
+
+    return assert_true(queue.is_empty(), "Expected clear() to clear delayed messages by default")
+
+
+func test_clear_delayed_messages_only() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.enqueue(Message.new("normal1"))
+    queue.enqueue(Message.new("normal2"))
+    queue.enqueue_after_ms(Message.new("delayed1"), 100)
+    queue.enqueue_after_ms(Message.new("delayed2"), 200)
+
+    queue.clear_delayed_messages()
+
+    return assert_true(queue.size() == 2 and queue.has_message("normal1") and queue.has_message("normal2"), "Expected main queue to remain intact after clearing delayed messages")
+
+
+func test_clear_delayed_messages_prevents_future_enqueue() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.enqueue_after_ms(Message.new("delayed1"), 50)
+    queue.enqueue_after_ms(Message.new("delayed2"), 100)
+
+    queue.clear_delayed_messages()
+
+    # Wait for the delay to pass
+    var start_time: int = Time.get_ticks_msec()
+    while Time.get_ticks_msec() - start_time < 150:
+        await Engine.get_main_loop().process_frame
+
+    return assert_true(queue.is_empty(), "Expected delayed messages to not be enqueued after being cleared")
+
+
+func test_remove_messages_in_stage_does_not_affect_delayed() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    var normal_msg: Message = Message.new("normal_stage1")
+    normal_msg.stage = 1
+
+    var delayed_msg: Message = Message.new("delayed_stage1")
+    delayed_msg.stage = 1
+
+    queue.enqueue(normal_msg)
+    queue.enqueue_after_ms(delayed_msg, 100)
+
+    queue.remove_messages_in_stage(1)
+
+    return assert_true(queue.is_empty(), "Expected normal message with stage 1 to be removed")
+
+
+func test_remove_delayed_messages_in_stage_does_not_affect_main() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    var normal_msg: Message = Message.new("normal_stage1")
+    normal_msg.stage = 1
+
+    var delayed_msg: Message = Message.new("delayed_stage1")
+    delayed_msg.stage = 1
+
+    queue.enqueue(normal_msg)
+    queue.enqueue_after_ms(delayed_msg, 100)
+
+    queue.remove_delayed_messages_in_stage(1)
+
+    # Verify main queue still has the message
+    if queue.size() != 1:
+        return fail_test("Expected main queue to still have 1 message, got " + str(queue.size()))
+
+    # Wait for delay to pass and verify delayed message wasn't enqueued
+    var start_time: int = Time.get_ticks_msec()
+    while Time.get_ticks_msec() - start_time < 150:
+        await Engine.get_main_loop().process_frame
+
+    return assert_equal(1, queue.size(), "Expected delayed message to not be enqueued after being removed")
+
+
+func test_remove_delayed_messages_in_stage_multiple_stages() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    var delayed1: Message = Message.new("delayed_stage0")
+    delayed1.stage = 0
+
+    var delayed2: Message = Message.new("delayed_stage1")
+    delayed2.stage = 1
+
+    var delayed3: Message = Message.new("delayed_stage2")
+    delayed3.stage = 2
+
+    queue.enqueue_after_ms(delayed1, 100)
+    queue.enqueue_after_ms(delayed2, 100)
+    queue.enqueue_after_ms(delayed3, 100)
+
+    queue.remove_delayed_messages_in_stage(1)
+
+    # Wait for delay
+    var start_time: int = Time.get_ticks_msec()
+    while Time.get_ticks_msec() - start_time < 150:
+        await Engine.get_main_loop().process_frame
+
+    return assert_true(
+        queue.size() == 2 and queue.has_message("delayed_stage0") and queue.has_message("delayed_stage2") and not queue.has_message("delayed_stage1"),
+        "Expected only stage 1 delayed message to be removed"
+    )
+
+
+func test_remove_messages_with_id_does_not_affect_delayed() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.enqueue(Message.new("target_id"))
+    queue.enqueue_after_ms(Message.new("target_id"), 100)
+
+    queue.remove_messages_with_id("target_id")
+
+    # Main queue should be empty
+    if not queue.is_empty():
+        return fail_test("Expected main queue to be empty after removing messages with target_id")
+
+    # Wait for delay to verify the delayed message still gets enqueued
+    var start_time: int = Time.get_ticks_msec()
+    while Time.get_ticks_msec() - start_time < 150:
+        await Engine.get_main_loop().process_frame
+
+    return assert_true(queue.size() == 1 and queue.has_message("target_id"), "Expected delayed message with same id to still be enqueued")
+
+
+func test_remove_delayed_messages_with_id_does_not_affect_main() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.enqueue(Message.new("target_id"))
+    queue.enqueue_after_ms(Message.new("target_id"), 100)
+
+    queue.remove_delayed_messages_with_id("target_id")
+
+    # Main queue should still have the message
+    if queue.size() != 1:
+        return fail_test("Expected main queue to still have 1 message, got " + str(queue.size()))
+
+    # Wait for delay to verify the delayed message doesn't get enqueued
+    var start_time: int = Time.get_ticks_msec()
+    while Time.get_ticks_msec() - start_time < 150:
+        await Engine.get_main_loop().process_frame
+
+    return assert_equal(1, queue.size(), "Expected delayed message to not be enqueued after being removed")
+
+
+func test_remove_delayed_messages_with_id_multiple_ids() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.enqueue_after_ms(Message.new("id1"), 100)
+    queue.enqueue_after_ms(Message.new("id2"), 100)
+    queue.enqueue_after_ms(Message.new("id3"), 100)
+    queue.enqueue_after_ms(Message.new("id2"), 100)  # Duplicate
+
+    queue.remove_delayed_messages_with_id("id2")
+
+    # Wait for delay
+    var start_time: int = Time.get_ticks_msec()
+    while Time.get_ticks_msec() - start_time < 150:
+        await Engine.get_main_loop().process_frame
+
+    return assert_true(
+        queue.size() == 2 and queue.has_message("id1") and queue.has_message("id3") and not queue.has_message("id2"), "Expected all delayed messages with id2 to be removed"
+    )
+
+
+func test_clear_mixed_queue_with_both_delayed_and_normal() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    # Add normal messages
+    queue.enqueue(Message.new("normal1"))
+    queue.enqueue(Message.new("normal2"))
+    queue.enqueue(Message.new("normal3"))
+
+    # Add delayed messages
+    queue.enqueue_after_ms(Message.new("delayed1"), 100)
+    queue.enqueue_after_frames(Message.new("delayed2"), 5)
+    queue.enqueue_after_ms(Message.new("delayed3"), 200)
+
+    # Verify initial state
+    if queue.size() != 3:
+        return fail_test("Expected 3 normal messages in queue, got " + str(queue.size()))
+
+    # Clear without affecting delayed
+    queue.clear()
+
+    if not queue.is_empty():
+        return fail_test("Expected main queue to be empty after clear()")
+
+    # Wait for some delayed messages to be enqueued
+    var start_time: int = Time.get_ticks_msec()
+    while Time.get_ticks_msec() - start_time < 150:
+        await Engine.get_main_loop().process_frame
+
+    # Some delayed messages should have been enqueued
+    return assert_greater_than(queue.size(), 0, "Expected delayed messages to be enqueued after clear(false)")
+
+
+func test_remove_stage_and_delayed_stage_independently() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    # Stage 0 messages
+    var normal_s0: Message = Message.new("normal_s0")
+    normal_s0.stage = 0
+    var delayed_s0: Message = Message.new("delayed_s0")
+    delayed_s0.stage = 0
+
+    # Stage 1 messages
+    var normal_s1: Message = Message.new("normal_s1")
+    normal_s1.stage = 1
+    var delayed_s1: Message = Message.new("delayed_s1")
+    delayed_s1.stage = 1
+
+    queue.enqueue(normal_s0)
+    queue.enqueue(normal_s1)
+    queue.enqueue_after_ms(delayed_s0, 100)
+    queue.enqueue_after_ms(delayed_s1, 100)
+
+    # Remove stage 0 from both queues
+    queue.remove_messages_in_stage(0)
+    queue.remove_delayed_messages_in_stage(0)
+
+    # Main queue should only have stage 1
+    if queue.size() != 1 or not queue.has_message("normal_s1"):
+        return fail_test("Expected only normal_s1 to remain in main queue")
+
+    # Wait for delayed messages
+    var start_time: int = Time.get_ticks_msec()
+    while Time.get_ticks_msec() - start_time < 150:
+        await Engine.get_main_loop().process_frame
+
+    # Only delayed_s1 should have been enqueued
+    return assert_true(
+        queue.size() == 2 and queue.has_message("normal_s1") and queue.has_message("delayed_s1") and not queue.has_message("delayed_s0"), "Expected only stage 1 messages to remain"
+    )
+
+
+func test_remove_id_and_delayed_id_independently() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.deduplicate = false  # Make sure deduplication doesn't mess up the test
+
+    queue.enqueue(Message.new("enqueued_keep_me"))
+    queue.enqueue(Message.new("remove_me"))
+    queue.enqueue(Message.new("enqueued_keep_me"))
+    queue.enqueue_after_ms(Message.new("delayed_ms_keep_me"), 100)
+    queue.enqueue_after_ms(Message.new("remove_me"), 100)
+    queue.enqueue_after_frames(Message.new("delayed_frames_keep_me"), 2)
+    queue.enqueue_after_frames(Message.new("remove_me"), 3)
+
+    # Verify initial state
+    if queue.size() != 3:
+        return fail_test("Expected 3 messages in queue, got " + str(queue.size()))
+
+    if queue._delayed_messages.size() != 4:
+        return fail_test("Expected 4 messages in delayed queue, got " + str(queue._delayed_messages.size()))
+
+    # Remove "remove_me" from the actual queue
+    queue.remove_messages_with_id("remove_me")
+
+    # Verify delayed queue unaffected
+    if queue._delayed_messages.size() != 4:
+        return fail_test("Expected 4 messages in delayed queue, got " + str(queue._delayed_messages.size()))
+
+    # Add it back, then remove from the _delayed_ queue
+    queue.enqueue(Message.new("remove_me"))
+    queue.remove_delayed_messages_with_id("remove_me")
+
+    if not queue.has_message("remove_me"):
+        return fail_test("Expected remove_me to be in main queue")
+
+    # Verify delayed queue had the message removed
+    if queue.has_delayed_message("remove_me"):
+        return fail_test("Expected remove_me to be removed from delayed queue")
+
+    # Verify delayed queue has the remaining messages
+    if queue._delayed_messages.size() != 2:
+        return fail_test("Expected 2 messages in delayed queue, got " + str(queue._delayed_messages.size()))
+
+    # Wait 100ms + 3 frames to make sure the delayed messages are enqueued
+    var start_time: int = Time.get_ticks_msec()
+    while Time.get_ticks_msec() - start_time < 100:
+        await Engine.get_main_loop().process_frame
+    for i in range(3):
+        await Engine.get_main_loop().process_frame
+
+    # Verify delayed queue now empty
+    if queue._delayed_messages.size() != 0:
+        return fail_test("Expected delayed queue to be empty, got " + str(queue._delayed_messages.size()))
+
+    # Verify main queue has all remaining messages (including the one that was added back)
+    if queue.size() != 5:
+        return fail_test("Expected 5 messages in main queue, got " + str(queue.size()))
+
+    return assert_true(
+        queue.has_message("enqueued_keep_me") and queue.has_message("delayed_ms_keep_me") and queue.has_message("delayed_frames_keep_me"),
+        "Expected all correct messages to remain and none of the ones to be removed"
+    )
+
+
+func test_clear_empty_delayed_messages() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.enqueue(Message.new("normal"))
+    queue.clear_delayed_messages()
+
+    return assert_equal(1, queue.size(), "Expected clearing empty delayed queue to not affect main queue")
+
+
+func test_remove_delayed_messages_nonexistent_stage() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    var delayed: Message = Message.new("delayed")
+    delayed.stage = 1
+
+    queue.enqueue_after_ms(delayed, 100)
+    queue.remove_delayed_messages_in_stage(99)
+
+    # Wait for delayed message
+    var start_time: int = Time.get_ticks_msec()
+    while Time.get_ticks_msec() - start_time < 150:
+        await Engine.get_main_loop().process_frame
+
+    return assert_equal(1, queue.size(), "Expected delayed message to still be enqueued when removing nonexistent stage")
+
+
+func test_remove_delayed_messages_nonexistent_id() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.enqueue_after_ms(Message.new("delayed"), 100)
+    queue.remove_delayed_messages_with_id("nonexistent")
+
+    # Wait for delayed message
+    var start_time: int = Time.get_ticks_msec()
+    while Time.get_ticks_msec() - start_time < 150:
+        await Engine.get_main_loop().process_frame
+
+    return assert_equal(1, queue.size(), "Expected delayed message to still be enqueued when removing nonexistent id")
