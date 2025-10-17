@@ -16,7 +16,7 @@ func test_message_creation_defaults() -> GDTestResult:
     )
 
 
-func test_message_queue_creation_with_payload() -> GDTestResult:
+func test_message_creation_with_payload() -> GDTestResult:
     var test_payload: Dictionary = {"test_key": "test_value"}
     var message: Message = Message.new("test_message", test_payload)
     if (
@@ -31,7 +31,7 @@ func test_message_queue_creation_with_payload() -> GDTestResult:
     return assert_true(message.payload.has("test_key") and message.payload["test_key"] == "test_value", "Expected payload to have 'test_key' with value 'test_value'")
 
 
-func test_message_queue_creation_with_all_settings() -> GDTestResult:
+func test_message_creation_with_all_settings() -> GDTestResult:
     var test_payload: Dictionary = {"key": "value"}
     var message: Message = Message.new("test_message", test_payload)
     message.priority = 1
