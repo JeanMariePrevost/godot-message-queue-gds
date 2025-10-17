@@ -18,14 +18,7 @@ var deduplicate: bool:
         _deduplicate = value
         if value:
             # Re-apply deduplication now since duplicates might have been introduced
-            var seen: Dictionary = {}
-            # iterate backwards to safely remove
-            for i in range(messages.size() - 1, -1, -1):
-                var msg: Message = messages[i]
-                if msg.deduplicate == Message.DuplicatePolicy.DEFAULT and seen.has(msg.id):
-                    messages.remove_at(i)
-                else:
-                    seen[msg.id] = true
+            apply_deduplication()
 
 
 ## Enqueue a message to the back of the queue.
@@ -64,6 +57,37 @@ func is_empty() -> bool:
 ## Remove all messages from the queue.
 func clear() -> void:
     messages.clear()
+
+
+## Remove all messages of a given stage from the queue.
+func remove_stage(stage: int) -> void:
+    messages = messages.filter(func(m: Message) -> bool: return m.stage != stage)
+
+
+## Remove all messages with a given id from the queue.
+func remove_messages_with_id(id: String) -> void:
+    messages = messages.filter(func(m: Message) -> bool: return m.id != id)
+
+
+## Remove duplicate messages from the queue, regardless of the deduplication policy.
+## Can optionally respect the "NEVER" deduplication policy set at the message level.
+func remove_duplicates(respect_never_policy: bool = false) -> void:
+    var seen: Dictionary = {}
+    # iterate backwards to safely remove
+    for i in range(messages.size() - 1, -1, -1):
+        var msg: Message = messages[i]
+        if (msg.deduplicate == Message.DuplicatePolicy.DEFAULT and seen.has(msg.id)) or (respect_never_policy and msg.deduplicate == Message.DuplicatePolicy.NEVER):
+            messages.remove_at(i)
+        else:
+            seen[msg.id] = true
+
+
+## Remove duplicate messages with a given id from the queue, regardless of the deduplication policy.
+func remove_duplicates_with_id(id: String) -> void:
+    for i in range(messages.size() - 1, -1, -1):
+        var msg: Message = messages[i]
+        if msg.id == id and msg.deduplicate == Message.DuplicatePolicy.DEFAULT:
+            messages.remove_at(i)
 
 
 ## Get all unique stages that exist across the queue's messages.
