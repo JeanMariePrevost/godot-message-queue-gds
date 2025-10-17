@@ -1,5 +1,7 @@
 extends GDTestCase
 
+# Note: Mostly AI-generated, some manually verified.
+
 # =============================================================================
 # MessageQueue Basic Operations Tests
 # =============================================================================
@@ -454,7 +456,7 @@ func test_queue_deduplication_only_affects_default_policy() -> GDTestResult:
     # Enabling deduplicate should only affect DEFAULT policy messages
     queue.deduplicate = true
 
-    return assert_equal(3, queue.size(), "Expected deduplicate property change to only affect DEFAULT policy messages")
+    return assert_equal(3, queue.size())
 
 
 func test_queue_deduplication_preserves_first_occurrence() -> GDTestResult:
@@ -577,3 +579,434 @@ func test_queue_stages_after_dequeue() -> GDTestResult:
     var stages: Array[int] = queue.list_stages()
 
     return assert_true(stages.size() == 1 and stages[0] == 2, "Expected list_stages to update after dequeue_for_stage")
+
+
+# =============================================================================
+# MessageQueue Removal Functions Tests
+# =============================================================================
+
+
+func test_remove_stage_empty_queue() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.remove_stage(0)
+    return assert_true(queue.is_empty(), "Expected remove_stage on empty queue to have no effect")
+
+
+func test_remove_stage_single_stage() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    var msg1: Message = Message.new("msg1")
+    msg1.stage = 1
+
+    var msg2: Message = Message.new("msg2")
+    msg2.stage = 1
+
+    var msg3: Message = Message.new("msg3")
+    msg3.stage = 1
+
+    queue.enqueue(msg1)
+    queue.enqueue(msg2)
+    queue.enqueue(msg3)
+
+    queue.remove_stage(1)
+
+    return assert_true(queue.is_empty(), "Expected remove_stage to remove all messages with stage 1")
+
+
+func test_remove_stage_multiple_stages() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    var msg1: Message = Message.new("msg1")
+    msg1.stage = 0
+
+    var msg2: Message = Message.new("msg2")
+    msg2.stage = 1
+
+    var msg3: Message = Message.new("msg3")
+    msg3.stage = 2
+
+    var msg4: Message = Message.new("msg4")
+    msg4.stage = 1
+
+    queue.enqueue(msg1)
+    queue.enqueue(msg2)
+    queue.enqueue(msg3)
+    queue.enqueue(msg4)
+
+    queue.remove_stage(1)
+
+    return assert_true(
+        queue.size() == 2 and queue.has_message("msg1") and queue.has_message("msg3") and not queue.has_message("msg2") and not queue.has_message("msg4"),
+        "Expected remove_stage to remove only messages with stage 1"
+    )
+
+
+func test_remove_stage_nonexistent() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.enqueue(Message.new("msg1"))
+    queue.enqueue(Message.new("msg2"))
+
+    queue.remove_stage(99)
+
+    return assert_equal(2, queue.size(), "Expected remove_stage with nonexistent stage to not affect queue")
+
+
+func test_remove_stage_preserves_order() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    var msg1: Message = Message.new("msg1")
+    msg1.stage = 0
+    msg1.priority = 10
+
+    var msg2: Message = Message.new("msg2")
+    msg2.stage = 1
+
+    var msg3: Message = Message.new("msg3")
+    msg3.stage = 0
+    msg3.priority = 5
+
+    queue.enqueue(msg1)
+    queue.enqueue(msg2)
+    queue.enqueue(msg3)
+
+    queue.remove_stage(1)
+
+    var first: Message = queue.dequeue()
+    var second: Message = queue.dequeue()
+
+    return assert_true(first.id == "msg1" and second.id == "msg3", "Expected remove_stage to preserve ordering of remaining messages")
+
+
+func test_remove_messages_with_id_empty_queue() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.remove_messages_with_id("test")
+    return assert_true(queue.is_empty(), "Expected remove_messages_with_id on empty queue to have no effect")
+
+
+func test_remove_messages_with_id_single_occurrence() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.deduplicate = false
+
+    queue.enqueue(Message.new("msg1"))
+    queue.enqueue(Message.new("target"))
+    queue.enqueue(Message.new("msg2"))
+
+    queue.remove_messages_with_id("target")
+
+    return assert_true(
+        queue.size() == 2 and not queue.has_message("target") and queue.has_message("msg1") and queue.has_message("msg2"),
+        "Expected remove_messages_with_id to remove the target message"
+    )
+
+
+func test_remove_messages_with_id_multiple_occurrences() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.deduplicate = false
+
+    var msg1: Message = Message.new("target")
+    msg1.deduplicate = Message.DuplicatePolicy.NEVER
+
+    var msg2: Message = Message.new("other")
+
+    var msg3: Message = Message.new("target")
+    msg3.deduplicate = Message.DuplicatePolicy.NEVER
+
+    var msg4: Message = Message.new("target")
+    msg4.deduplicate = Message.DuplicatePolicy.NEVER
+
+    queue.enqueue(msg1)
+    queue.enqueue(msg2)
+    queue.enqueue(msg3)
+    queue.enqueue(msg4)
+
+    queue.remove_messages_with_id("target")
+
+    return assert_true(
+        queue.size() == 1 and not queue.has_message("target") and queue.has_message("other"), "Expected remove_messages_with_id to remove all messages with target id"
+    )
+
+
+func test_remove_messages_with_id_nonexistent() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.enqueue(Message.new("msg1"))
+    queue.enqueue(Message.new("msg2"))
+
+    queue.remove_messages_with_id("nonexistent")
+
+    return assert_equal(2, queue.size(), "Expected remove_messages_with_id with nonexistent id to not affect queue")
+
+
+func test_remove_messages_with_id_different_stages_priorities() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.deduplicate = false
+
+    var msg1: Message = Message.new("target")
+    msg1.stage = 0
+    msg1.priority = 10
+    msg1.deduplicate = Message.DuplicatePolicy.NEVER
+
+    var msg2: Message = Message.new("keep")
+    msg2.stage = 1
+
+    var msg3: Message = Message.new("target")
+    msg3.stage = 2
+    msg3.priority = 5
+    msg3.deduplicate = Message.DuplicatePolicy.NEVER
+
+    queue.enqueue(msg1)
+    queue.enqueue(msg2)
+    queue.enqueue(msg3)
+
+    queue.remove_messages_with_id("target")
+
+    return assert_true(
+        queue.size() == 1 and queue.has_message("keep") and not queue.has_message("target"),
+        "Expected remove_messages_with_id to remove all occurrences regardless of stage/priority"
+    )
+
+
+func test_remove_duplicates_no_duplicates() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.deduplicate = false
+
+    queue.enqueue(Message.new("msg1"))
+    queue.enqueue(Message.new("msg2"))
+    queue.enqueue(Message.new("msg3"))
+
+    queue.remove_duplicates()
+
+    return assert_equal(3, queue.size(), "Expected remove_duplicates with no duplicates to keep all messages")
+
+
+func test_remove_duplicates_with_default_policy() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.deduplicate = false
+
+    var msg1: Message = Message.new("duplicate")
+    msg1.deduplicate = Message.DuplicatePolicy.DEFAULT
+    msg1.payload = "first"
+
+    var msg2: Message = Message.new("duplicate")
+    msg2.deduplicate = Message.DuplicatePolicy.DEFAULT
+    msg2.payload = "second"
+
+    var msg3: Message = Message.new("duplicate")
+    msg3.deduplicate = Message.DuplicatePolicy.DEFAULT
+    msg3.payload = "third"
+
+    queue.enqueue(msg1)
+    queue.enqueue(msg2)
+    queue.enqueue(msg3)
+
+    queue.remove_duplicates()
+
+    var remaining: Message = queue.dequeue()
+
+    return assert_true(
+        queue.size() == 0 and remaining != null and remaining.id == "duplicate" and remaining.payload == "third",
+        "Expected remove_duplicates to keep last occurrence of DEFAULT policy duplicates"
+    )
+
+
+func test_remove_duplicates_respects_never_policy_false() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.deduplicate = false
+
+    var msg1: Message = Message.new("identical_id")
+    msg1.deduplicate = Message.DuplicatePolicy.NEVER
+
+    var msg2: Message = Message.new("identical_id")
+    msg2.deduplicate = Message.DuplicatePolicy.NEVER
+
+    queue.enqueue(msg1)
+    queue.enqueue(msg2)
+
+    queue.remove_duplicates(false)
+
+    return assert_equal(1, queue.size())
+
+
+func test_remove_duplicates_respects_never_policy_true() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.deduplicate = false
+
+    var msg1: Message = Message.new("identical_id")
+    msg1.deduplicate = Message.DuplicatePolicy.DEFAULT
+
+    var msg2: Message = Message.new("identical_id")
+    msg2.deduplicate = Message.DuplicatePolicy.NEVER
+
+    var msg3: Message = Message.new("identical_id")
+    msg3.deduplicate = Message.DuplicatePolicy.DEFAULT
+
+    queue.enqueue(msg1)
+    queue.enqueue(msg2)
+    queue.enqueue(msg3)
+
+    queue.remove_duplicates(true)
+
+    if queue.size() != 1:
+        return fail_test("Expected queue to be of size 1, got " + str(queue.size()))
+
+    if not queue.has_message("identical_id"):
+        return fail_test("Expected queue to have message with id 'identical_id', got " + str(queue.peek().id))
+
+    if queue.peek().deduplicate != Message.DuplicatePolicy.NEVER:
+        return fail_test("Expected peek to return message with deduplicate policy NEVER, got " + str(queue.peek().deduplicate))
+
+    return pass_test()
+
+
+func test_remove_duplicates_mixed_policies() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.deduplicate = false
+
+    var msg1: Message = Message.new("dup1")
+    msg1.deduplicate = Message.DuplicatePolicy.DEFAULT
+
+    var msg2: Message = Message.new("dup1")
+    msg2.deduplicate = Message.DuplicatePolicy.DEFAULT
+
+    var msg3: Message = Message.new("dup2")
+    msg3.deduplicate = Message.DuplicatePolicy.NEVER
+
+    var msg4: Message = Message.new("dup2")
+    msg4.deduplicate = Message.DuplicatePolicy.NEVER
+
+    var msg5: Message = Message.new("unique")
+
+    queue.enqueue(msg1)
+    queue.enqueue(msg2)
+    queue.enqueue(msg3)
+    queue.enqueue(msg4)
+    queue.enqueue(msg5)
+
+    queue.remove_duplicates(false)
+
+    return assert_true(
+        queue.size() == 3 and queue.has_message("dup1") and queue.has_message("dup2") and queue.has_message("unique"),
+        "Expected remove_duplicates to handle mixed policies correctly"
+    )
+
+
+func test_remove_duplicates_preserves_order() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.deduplicate = false
+
+    var msg1: Message = Message.new("unique1")
+    msg1.priority = 10
+
+    var msg2: Message = Message.new("dup")
+    msg2.priority = 5
+
+    var msg3: Message = Message.new("dup")
+    msg3.priority = 5
+
+    var msg4: Message = Message.new("unique2")
+    msg4.priority = 1
+
+    queue.enqueue(msg1)
+    queue.enqueue(msg2)
+    queue.enqueue(msg3)
+    queue.enqueue(msg4)
+
+    queue.remove_duplicates()
+
+    var first: Message = queue.dequeue()
+    var second: Message = queue.dequeue()
+    var third: Message = queue.dequeue()
+
+    return assert_true(first.id == "unique1" and second.id == "dup" and third.id == "unique2", "Expected remove_duplicates to preserve message ordering")
+
+
+func test_remove_duplicates_with_id_no_matching_id() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.enqueue(Message.new("msg1"))
+    queue.enqueue(Message.new("msg2"))
+
+    queue.remove_duplicates_with_id("nonexistent")
+
+    return assert_equal(2, queue.size(), "Expected remove_duplicates_with_id with nonexistent id to not affect queue")
+
+
+func test_remove_duplicates_with_id_removes_all_default_policy() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.deduplicate = false
+
+    var msg1: Message = Message.new("target")
+    msg1.deduplicate = Message.DuplicatePolicy.DEFAULT
+
+    var msg2: Message = Message.new("other")
+
+    var msg3: Message = Message.new("target")
+    msg3.deduplicate = Message.DuplicatePolicy.DEFAULT
+
+    queue.enqueue(msg1)
+    queue.enqueue(msg2)
+    queue.enqueue(msg3)
+
+    queue.remove_duplicates_with_id("target")
+
+    return assert_equal(2, queue.size())
+
+
+func test_remove_duplicates_with_id_preserves_never_policy() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.deduplicate = false
+
+    var msg1: Message = Message.new("target")
+    msg1.deduplicate = Message.DuplicatePolicy.DEFAULT
+
+    var msg2: Message = Message.new("target")
+    msg2.deduplicate = Message.DuplicatePolicy.NEVER
+
+    var msg3: Message = Message.new("target")
+    msg3.deduplicate = Message.DuplicatePolicy.DEFAULT
+
+    queue.enqueue(msg1)
+    queue.enqueue(msg2)
+    queue.enqueue(msg3)
+
+    queue.remove_duplicates_with_id("target", true)
+
+    if queue.size() != 1:
+        return fail_test("Expected queue to be of size 1, got " + str(queue.size()))
+
+    if not queue.has_message("target"):
+        return fail_test("Expected queue to have message with id 'target', got " + str(queue.peek().id))
+
+    if queue.peek().deduplicate != Message.DuplicatePolicy.NEVER:
+        return fail_test("Expected peek to return message with deduplicate policy NEVER, got " + str(queue.peek().deduplicate))
+
+    return pass_test()
+
+
+func test_remove_duplicates_with_id_preserves_always_policy() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.deduplicate = false
+
+    var msg1: Message = Message.new("target")
+    msg1.deduplicate = Message.DuplicatePolicy.ALWAYS
+
+    var msg2: Message = Message.new("target")
+    msg2.deduplicate = Message.DuplicatePolicy.ALWAYS
+
+    var msg3: Message = Message.new("target")
+    msg3.deduplicate = Message.DuplicatePolicy.ALWAYS
+
+    queue.enqueue(msg1)
+    queue.enqueue(msg2)
+    queue.enqueue(msg3)
+
+    queue.remove_duplicates_with_id("target")
+
+    return assert_true(
+        queue.size() == 1 and queue.has_message("target") and queue.peek().deduplicate == Message.DuplicatePolicy.ALWAYS,
+        "Expected remove_duplicates_with_id to preserve ALWAYS policy messages"
+    )
+
+
+func test_remove_duplicates_with_id_empty_queue() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.remove_duplicates_with_id("test")
+    return assert_true(queue.is_empty(), "Expected remove_duplicates_with_id on empty queue to have no effect")

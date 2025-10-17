@@ -18,7 +18,7 @@ var deduplicate: bool:
         _deduplicate = value
         if value:
             # Re-apply deduplication now since duplicates might have been introduced
-            apply_deduplication()
+            remove_duplicates(true)
 
 
 ## Enqueue a message to the back of the queue.
@@ -76,17 +76,42 @@ func remove_duplicates(respect_never_policy: bool = false) -> void:
     # iterate backwards to safely remove
     for i in range(messages.size() - 1, -1, -1):
         var msg: Message = messages[i]
-        if (msg.deduplicate == Message.DuplicatePolicy.DEFAULT and seen.has(msg.id)) or (respect_never_policy and msg.deduplicate == Message.DuplicatePolicy.NEVER):
-            messages.remove_at(i)
-        else:
-            seen[msg.id] = true
+        if seen.has(msg.id):
+            remove_duplicates_with_id(msg.id, respect_never_policy)
+            continue
+        seen[msg.id] = true
 
 
 ## Remove duplicate messages with a given id from the queue, regardless of the deduplication policy.
-func remove_duplicates_with_id(id: String) -> void:
+## Can optionally respect the "NEVER" deduplication policy set at the message level.
+func remove_duplicates_with_id(id: String, respect_never_policy: bool = false) -> void:
+    var have_nevers_to_keep: bool = false
+
+    # First detect if we have any NEVER messages to keep if we need to respect the policy
+    if respect_never_policy:
+        for msg in messages:
+            if msg.id == id and msg.deduplicate == Message.DuplicatePolicy.NEVER:
+                have_nevers_to_keep = true
+                break
+
+    # Iterate backwards so we can remove safely
+    var seen := false
     for i in range(messages.size() - 1, -1, -1):
         var msg: Message = messages[i]
-        if msg.id == id and msg.deduplicate == Message.DuplicatePolicy.DEFAULT:
+        if msg.id != id:
+            continue
+
+        if respect_never_policy and have_nevers_to_keep:
+            # Keep all NEVERs, remove everything else
+            if msg.deduplicate != Message.DuplicatePolicy.NEVER:
+                messages.remove_at(i)
+            continue
+
+        # Normal deduplication (remove all but one)
+        if not seen:
+            # First one encountered (latest in queue) is kept
+            seen = true
+        else:
             messages.remove_at(i)
 
 
