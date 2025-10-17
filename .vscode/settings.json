@@ -1,0 +1,15 @@
+{
+  "godotTools.editorPath.godot4": "D:\\Work\\Godot_Binaries\\Godot_v4.5-stable_win64\\Godot_v4.5-stable_win64.exe",
+
+  "files.exclude": {
+    "**/.git": true,
+    "**/*.uid": true
+  },
+
+  "editor.semanticHighlighting.enabled": false,
+
+  "[gdscript]": {
+    "editor.defaultFormatter": "EddieDover.gdscript-formatter-linter"
+  },
+  "godotFormatterAndLinter.indentType": "Spaces"
+}
