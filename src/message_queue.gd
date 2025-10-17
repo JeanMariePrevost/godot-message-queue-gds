@@ -1,15 +1,20 @@
 # MessageQueue.gd
-## MessageQueue / "Command" queue system that can be used to queue up messages to be processed in order,
-## pool, deduplicate, delay messages and more.
+## MessageQueue / "Command" queue system that can be used to queue up _messages to be processed in order,
+## pool, deduplicate, delay _messages and more.
 
 extends RefCounted
 class_name MessageQueue
 
-var messages: Array[Message] = []
+## The internal list of _messages in the queue.
+var _messages: Array[Message]
 
-## Default deduplication policy for messages in this queue.
+## The internal list of messages "queued to be enqueued"
+## E.g. messages added through `enqueue_after_ms` or `enqueue_after_frames`
+var _delayed_messages: Array[Message]
+
+## Default deduplication policy for _messages in this queue.
 ## If true, only 1 message of any given id can exist in the queue at any time.
-## Applies to messages with `deduplicate` set to `DEFAULT`.
+## Applies to _messages with `deduplicate` set to `DEFAULT`.
 var _deduplicate: bool = true
 var deduplicate: bool:
     get:
@@ -19,6 +24,29 @@ var deduplicate: bool:
         if value:
             # Re-apply deduplication now since duplicates might have been introduced
             remove_duplicates(true)
+
+
+## Creates a new empty MessageQueue.
+func _init() -> void:
+    _messages = []
+    _delayed_messages = []
+    Engine.get_main_loop().process_frame.connect(_on_process_frame)
+
+
+## Internally used for dlays and other self-managed features.
+func _on_process_frame() -> void:
+    ## Go through the delayed messages and enqueue them if the time has come.
+    for i in range(_delayed_messages.size() - 1, -1, -1):  # iterate backwards to safely remove
+        var message: Message = _delayed_messages[i]
+        if message.internal_enqueue_after_timestamp >= 0 and message.internal_enqueue_after_timestamp <= Time.get_ticks_msec():
+            enqueue(message)
+            _delayed_messages.remove_at(i)
+            print("Enqueued message: ", message.id)
+            continue
+        if message.internal_enqueue_after_frame_stamp >= 0 and message.internal_enqueue_after_frame_stamp <= Engine.get_process_frames():
+            enqueue(message)
+            _delayed_messages.remove_at(i)
+            continue
 
 
 ## Enqueue a message to the back of the queue.
@@ -33,78 +61,90 @@ func enqueue(new_message: Message) -> void:
             return
 
     # Insertion at correct position
-    for i in range(messages.size()):
-        var existing_message: Message = messages[i]
+    for i in range(_messages.size()):
+        var existing_message: Message = _messages[i]
 
         if m_stage < existing_message.stage or (m_stage == existing_message.stage and m_priority > existing_message.priority):
-            messages.insert(i, new_message)
+            _messages.insert(i, new_message)
             return
 
     # If still not inserted, goes at the back
-    messages.append(new_message)
+    _messages.append(new_message)
 
 
-## Total count of messages in the queue.
+## Buffers a message to be enqueued after a number of milliseconds, in real time.
+func enqueue_after_ms(new_message: Message, ms: int) -> void:
+    new_message.internal_enqueue_after_timestamp = Time.get_ticks_msec() + ms
+    _delayed_messages.append(new_message)
+
+
+## Buffers a message to be enqueued after a number of frames, in engine time.
+func enqueue_after_frames(new_message: Message, frames: int) -> void:
+    new_message.internal_enqueue_after_frame_stamp = Engine.get_process_frames() + frames
+    _delayed_messages.append(new_message)
+
+
+## Total count of _messages in the queue.
 func size() -> int:
-    return messages.size()
+    return _messages.size()
 
 
 ## True if the queue is empty.
 func is_empty() -> bool:
-    return messages.is_empty()
+    return _messages.is_empty()
 
 
-## Remove all messages from the queue.
+## Remove all _messages from the queue.
 func clear() -> void:
-    messages.clear()
+    _messages.clear()
 
 
-## Remove all messages of a given stage from the queue.
+## Remove all _messages of a given stage from the queue.
 func remove_stage(stage: int) -> void:
-    messages = messages.filter(func(m: Message) -> bool: return m.stage != stage)
+    _messages = _messages.filter(func(m: Message) -> bool: return m.stage != stage)
 
 
-## Remove all messages with a given id from the queue.
+## Remove all _messages with a given id from the queue.
 func remove_messages_with_id(id: String) -> void:
-    messages = messages.filter(func(m: Message) -> bool: return m.id != id)
+    _messages = _messages.filter(func(m: Message) -> bool: return m.id != id)
 
 
-## Remove duplicate messages from the queue, regardless of the deduplication policy.
+## Remove duplicate _messages from the queue, regardless of the deduplication policy.
 ## Can optionally respect the "NEVER" deduplication policy set at the message level.
 func remove_duplicates(respect_never_policy: bool = false) -> void:
     var seen: Dictionary = {}
     # iterate backwards to safely remove
-    for i in range(messages.size() - 1, -1, -1):
-        var msg: Message = messages[i]
+    for i in range(_messages.size() - 1, -1, -1):
+        var msg: Message = _messages[i]
         if seen.has(msg.id):
             remove_duplicates_with_id(msg.id, respect_never_policy)
             continue
         seen[msg.id] = true
 
 
-## Remove duplicate messages with a given id from the queue, regardless of the deduplication policy.
+## Remove duplicate _messages with a given id from the queue, regardless of the deduplication policy.
 ## Can optionally respect the "NEVER" deduplication policy set at the message level.
 func remove_duplicates_with_id(id: String, respect_never_policy: bool = false) -> void:
     var have_nevers_to_keep: bool = false
 
-    # First detect if we have any NEVER messages to keep if we need to respect the policy
+    # First detect if we have any NEVER _messages to keep if we need to respect the policy
     if respect_never_policy:
-        for msg in messages:
+        for msg in _messages:
             if msg.id == id and msg.deduplicate == Message.DuplicatePolicy.NEVER:
                 have_nevers_to_keep = true
                 break
 
     # Iterate backwards so we can remove safely
     var seen := false
-    for i in range(messages.size() - 1, -1, -1):
-        var msg: Message = messages[i]
+    for i in range(_messages.size() - 1, -1, -1):
+        var msg: Message = _messages[i]
         if msg.id != id:
             continue
 
         if respect_never_policy and have_nevers_to_keep:
             # Keep all NEVERs, remove everything else
             if msg.deduplicate != Message.DuplicatePolicy.NEVER:
-                messages.remove_at(i)
+                _messages.remove_at(i)
             continue
 
         # Normal deduplication (remove all but one)
@@ -112,15 +152,15 @@ func remove_duplicates_with_id(id: String, respect_never_policy: bool = false) -
             # First one encountered (latest in queue) is kept
             seen = true
         else:
-            messages.remove_at(i)
+            _messages.remove_at(i)
 
 
-## Get all unique stages that exist across the queue's messages.
+## Get all unique stages that exist across the queue's _messages.
 func list_stages() -> Array[int]:
     # Build a dictionary to get all the unique stages
     # This avoids iterating over the entire queue multiple times
     var unique: Dictionary[int, bool] = {}
-    for m in messages:
+    for m in _messages:
         unique[m.stage] = true
     var stages: Array[int] = unique.keys()
     stages.sort()
@@ -130,34 +170,34 @@ func list_stages() -> Array[int]:
 ## Returns (and removes) the next message in queue.
 ## (The message with the lowest stage, then highest priority)
 func dequeue() -> Message:
-    return null if messages.is_empty() else messages.pop_front()
+    return null if _messages.is_empty() else _messages.pop_front()
 
 
 ## Returns (and removes) the next message for the given stage.
 func dequeue_for_stage(stage: int) -> Message:
-    for i in range(messages.size()):
-        if messages[i].stage == stage:
-            return messages.pop_at(i)
+    for i in range(_messages.size()):
+        if _messages[i].stage == stage:
+            return _messages.pop_at(i)
     return null
 
 
 ## Returns the next message in queue without removing it.
 func peek() -> Message:
-    return null if messages.is_empty() else messages[0]
+    return null if _messages.is_empty() else _messages[0]
 
 
 ## Returns the next message in queue for the given stage without removing it.
 func peek_stage(stage: int) -> Message:
-    for i in range(messages.size()):
-        if messages[i].stage == stage:
-            return messages[i]
+    for i in range(_messages.size()):
+        if _messages[i].stage == stage:
+            return _messages[i]
     return null
 
 
 ## Checks whether a message with a given id is already in the queue.
 ## Note: does not consider other metadata like payload or priority.
 func has_message(id: String) -> bool:
-    for message in messages:
+    for message in _messages:
         if message.id == id:
             return true
     return false
@@ -166,7 +206,7 @@ func has_message(id: String) -> bool:
 ## String representation of the queue (front displayed at the left).
 func _to_string() -> String:
     ## TODO: Implement this properly
-    return "MessageQueue(" + str(messages) + ")"
+    return "MessageQueue(" + str(_messages) + ")"
 
 # =======================================
 # Custom iterator implementation

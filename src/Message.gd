@@ -29,6 +29,16 @@ var stage: int = 0
 ## NEVER disables deduplication regardless of the queue's policy.
 var deduplicate: DuplicatePolicy = DuplicatePolicy.DEFAULT
 
+## INTERNAL USE ONLY: Defines a timestamp in relative to `Time.get_ticks_msec()` after which the message should be enqueued.
+## For example, to immediately prepare a message that should only be processed after 1 second.
+## -1 is the default "not set" value.
+var internal_enqueue_after_timestamp: int = -1
+
+## INTERNAL USE ONLY: Defines a frame stamp in `Engine.get_process_frames()` after which the message should be enqueued.
+## For example, to immediately prepare a message that should only be processed on the next frame.
+## -1 is the default "not set" value.
+var internal_enqueue_after_frame_stamp: int = -1
+
 
 ## Creates a new message with the given id and optional payload.
 ## @param id The id of the message (e.g. "end_turn", "tutorial_screen_1_3", "game_over").

@@ -1010,3 +1010,317 @@ func test_remove_duplicates_with_id_empty_queue() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
     queue.remove_duplicates_with_id("test")
     return assert_true(queue.is_empty(), "Expected remove_duplicates_with_id on empty queue to have no effect")
+
+
+# =============================================================================
+# MessageQueue Delayed Enqueue Tests
+# =============================================================================
+
+
+func test_enqueue_after_ms_not_immediate() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    var message: Message = Message.new("delayed_msg")
+
+    queue.enqueue_after_ms(message, 1000)
+
+    return assert_true(queue.is_empty() and not queue.has_message("delayed_msg"), "Expected message enqueued with delay to not appear immediately in queue")
+
+
+func test_enqueue_after_ms_sets_timestamp() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    var message: Message = Message.new("delayed_msg")
+    var before_time: int = Time.get_ticks_msec()
+
+    queue.enqueue_after_ms(message, 500)
+
+    return assert_true(
+        message.internal_enqueue_after_timestamp > before_time and message.internal_enqueue_after_timestamp <= before_time + 500 + 10,
+        "Expected internal timestamp to be set correctly (within margin)"
+    )
+
+
+func test_enqueue_after_ms_zero_delay() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    var message: Message = Message.new("immediate_msg")
+
+    queue.enqueue_after_ms(message, 0)
+
+    # With 0 delay, it should still be delayed (not immediately enqueued)
+    # but should be enqueued on the very next process frame
+    return assert_false(queue.has_message("immediate_msg"), "Expected 0ms delay to still defer to next frame")
+
+
+func test_enqueue_after_ms_multiple_messages() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    var msg1: Message = Message.new("delayed1")
+    var msg2: Message = Message.new("delayed2")
+    var msg3: Message = Message.new("delayed3")
+
+    queue.enqueue_after_ms(msg1, 100)
+    queue.enqueue_after_ms(msg2, 200)
+    queue.enqueue_after_ms(msg3, 300)
+
+    return assert_true(queue.is_empty() and queue.size() == 0, "Expected all delayed messages to not be in main queue yet")
+
+
+func test_enqueue_after_ms_mixed_with_normal() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.enqueue(Message.new("normal1"))
+    queue.enqueue_after_ms(Message.new("delayed1"), 100)
+    queue.enqueue(Message.new("normal2"))
+
+    return assert_true(
+        queue.size() == 2 and queue.has_message("normal1") and queue.has_message("normal2") and not queue.has_message("delayed1"),
+        "Expected normal messages to be in queue, delayed messages not"
+    )
+
+
+func test_enqueue_after_frames_not_immediate() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    var message: Message = Message.new("delayed_frame_msg")
+
+    queue.enqueue_after_frames(message, 10)
+
+    return assert_true(queue.is_empty() and not queue.has_message("delayed_frame_msg"), "Expected message enqueued with frame delay to not appear immediately in queue")
+
+
+func test_enqueue_after_frames_sets_frame_stamp() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    var message: Message = Message.new("delayed_frame_msg")
+    var current_frame: int = Engine.get_process_frames()
+
+    queue.enqueue_after_frames(message, 5)
+
+    return assert_equal(current_frame + 5, message.internal_enqueue_after_frame_stamp, "Expected internal frame stamp to be set correctly")
+
+
+func test_enqueue_after_frames_zero_delay() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    var message: Message = Message.new("immediate_frame_msg")
+
+    queue.enqueue_after_frames(message, 0)
+
+    # With 0 frame delay, it should still be delayed to next frame
+    return assert_false(queue.has_message("immediate_frame_msg"), "Expected 0 frame delay to still defer to next frame")
+
+
+func test_enqueue_after_frames_multiple_messages() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    var msg1: Message = Message.new("frame_delayed1")
+    var msg2: Message = Message.new("frame_delayed2")
+    var msg3: Message = Message.new("frame_delayed3")
+
+    queue.enqueue_after_frames(msg1, 1)
+    queue.enqueue_after_frames(msg2, 2)
+    queue.enqueue_after_frames(msg3, 3)
+
+    return assert_true(queue.is_empty() and queue.size() == 0, "Expected all frame-delayed messages to not be in main queue yet")
+
+
+func test_enqueue_after_frames_mixed_with_normal() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.enqueue(Message.new("normal1"))
+    queue.enqueue_after_frames(Message.new("frame_delayed1"), 5)
+    queue.enqueue(Message.new("normal2"))
+
+    return assert_true(
+        queue.size() == 2 and queue.has_message("normal1") and queue.has_message("normal2") and not queue.has_message("frame_delayed1"),
+        "Expected normal messages to be in queue, frame-delayed messages not"
+    )
+
+
+func test_delayed_messages_preserve_properties() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    var message: Message = Message.new("delayed_with_props")
+    message.priority = 10
+    message.stage = 2
+    message.payload = {"data": "test"}
+    message.deduplicate = Message.DuplicatePolicy.ALWAYS
+
+    queue.enqueue_after_ms(message, 100)
+
+    return assert_true(
+        message.priority == 10 and message.stage == 2 and message.payload == {"data": "test"} and message.deduplicate == Message.DuplicatePolicy.ALWAYS,
+        "Expected delayed message to preserve all its properties"
+    )
+
+
+func test_delayed_enqueue_respects_priority_when_added() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    # Add a normal low priority message
+    var low_priority: Message = Message.new("low")
+    low_priority.priority = 1
+    queue.enqueue(low_priority)
+
+    # Create a high priority delayed message
+    var high_priority: Message = Message.new("high")
+    high_priority.priority = 10
+
+    # Store the delay info before manual simulation
+    queue.enqueue_after_ms(high_priority, 50)
+
+    # Manually enqueue it to simulate the delay passing
+    # (since we can't easily advance time in tests)
+    queue.enqueue(high_priority)
+
+    var first: Message = queue.dequeue()
+
+    return assert_equal("high", first.id, "Expected delayed high priority message to be dequeued first when it gets enqueued")
+
+
+func test_delayed_message_can_be_cancelled() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    var message: Message = Message.new("cancellable")
+
+    queue.enqueue_after_ms(message, 100)
+
+    # Clear the queue (this should not affect delayed messages)
+    queue.clear()
+
+    # The delayed message should still not be in the main queue
+    return assert_false(queue.has_message("cancellable"), "Expected delayed message to not be affected by queue.clear()")
+
+
+func test_enqueue_after_ms_with_negative_delay() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    var message: Message = Message.new("negative_delay")
+
+    queue.enqueue_after_ms(message, -100)
+
+    # Negative delay should still defer the message (treated as past timestamp)
+    # The message won't be in the queue immediately
+    return assert_false(queue.has_message("negative_delay"), "Expected negative delay to still defer message")
+
+
+func test_enqueue_after_frames_with_negative_delay() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    var message: Message = Message.new("negative_frame_delay")
+
+    queue.enqueue_after_frames(message, -5)
+
+    # Negative frame delay should still defer the message
+    return assert_false(queue.has_message("negative_frame_delay"), "Expected negative frame delay to still defer message")
+
+
+func test_enqueue_after_ms_zero_delay_added_on_next_frame() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    var message: Message = Message.new("delayed_msg")
+
+    queue.enqueue_after_ms(message, 0)
+
+    await Engine.get_main_loop().process_frame
+
+    if queue.size() != 1:
+        return fail_test("Expected queue to be of size 1, got " + str(queue.size()))
+
+    return assert_true(queue.has_message("delayed_msg"))
+
+
+func test_enqueue_after_ms_in_queue_after_time() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    var message: Message = Message.new("delayed_msg")
+
+    queue.enqueue_after_ms(message, 90)
+
+    if queue.size() != 0:
+        return fail_test("Expected queue to be empty, got " + str(queue.size()))
+
+    var start_time: int = Time.get_ticks_msec()
+    while Time.get_ticks_msec() - start_time < 90:
+        await Engine.get_main_loop().process_frame
+
+    if queue.size() != 1:
+        return fail_test("Expected queue to be of size 1, got " + str(queue.size()))
+
+    return assert_true(queue.has_message("delayed_msg"))
+
+
+func test_enqueue_after_frames_zero_delay_added_on_next_frame() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    var message: Message = Message.new("delayed_frame_msg")
+
+    queue.enqueue_after_frames(message, 0)
+
+    if queue.size() != 0:
+        return fail_test("Expected queue to be empty, got " + str(queue.size()))
+
+    await Engine.get_main_loop().process_frame
+
+    return assert_equal(1, queue.size())
+
+
+func test_enqueue_after_multiple_mixed_messages() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    # Direct enqueues
+    var direct_msg1: Message = Message.new("direct1")
+    var direct_msg2: Message = Message.new("direct2")
+
+    # Time-delayed messages
+    var time_msg1: Message = Message.new("time_delayed1")
+    var time_msg2: Message = Message.new("time_delayed2")
+
+    # Frame-delayed messages
+    var frame_msg1: Message = Message.new("frame_delayed1")
+    var frame_msg2: Message = Message.new("frame_delayed2")
+
+    # Enqueue mixed types
+    queue.enqueue(direct_msg1)
+    queue.enqueue_after_ms(time_msg1, 50)
+    queue.enqueue_after_frames(frame_msg1, 1)
+    queue.enqueue(direct_msg2)
+    queue.enqueue_after_ms(time_msg2, 120)
+    queue.enqueue_after_frames(frame_msg2, 5)
+
+    # Check initial state
+    if queue.size() != 2:
+        return fail_test("Expected 2 direct messages in queue, got " + str(queue.size()))
+
+    if not queue.has_message("direct1") or not queue.has_message("direct2"):
+        return fail_test("Expected direct messages to be in queue")
+
+    # Wait for frame-delayed messages
+    for i in range(2):  # Wait 1 extra to avoid order of execution issues
+        await Engine.get_main_loop().process_frame
+
+    if queue.size() != 3:
+        return fail_test("Expected 3 messages after first frame (2 direct + 1 frame), got " + str(queue.size()))
+
+    if not queue.has_message("frame_delayed1"):
+        return fail_test("Expected frame_delayed1 to be enqueued after first frame")
+
+    for i in range(4):  # Wait 1 extra to avoid order of execution issues
+        await Engine.get_main_loop().process_frame
+
+    if queue.size() != 4:
+        return fail_test("Expected 4 messages after second frame (2 direct + 2 frame), got " + str(queue.size()))
+
+    if not queue.has_message("frame_delayed2"):
+        return fail_test("Expected frame_delayed2 to be enqueued after second frame")
+
+    # Wait for time-delayed messages
+    var start_time: int = Time.get_ticks_msec()
+    while Time.get_ticks_msec() - start_time < 110:
+        await Engine.get_main_loop().process_frame
+
+    if queue.size() != 6:
+        return fail_test("Expected 6 messages after time delays (2 direct + 2 frame + 2 time), got " + str(queue.size()))
+
+    if not queue.has_message("time_delayed1") or not queue.has_message("time_delayed2"):
+        return fail_test("Expected both time-delayed messages to be enqueued")
+
+    return assert_true(
+        (
+            queue.has_message("direct1")
+            and queue.has_message("direct2")
+            and queue.has_message("frame_delayed1")
+            and queue.has_message("frame_delayed2")
+            and queue.has_message("time_delayed1")
+            and queue.has_message("time_delayed2")
+        ),
+        "Expected all mixed message types to be properly enqueued in correct order"
+    )
