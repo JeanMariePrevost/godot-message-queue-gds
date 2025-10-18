@@ -1353,7 +1353,7 @@ func test_clear_including_delayed_messages() -> GDTestResult:
     queue.enqueue_after_ms(Message.new("delayed2"), 200)
 
     queue.clear()
-    queue.clear_delayed_messages()
+    queue.clear_scheduled_messages()
 
     # After clear with delayed messages, wait a frame to verify nothing gets enqueued
     await Engine.get_main_loop().process_frame
@@ -1382,7 +1382,7 @@ func test_clear_delayed_messages_only() -> GDTestResult:
     queue.enqueue_after_ms(Message.new("delayed1"), 100)
     queue.enqueue_after_ms(Message.new("delayed2"), 200)
 
-    queue.clear_delayed_messages()
+    queue.clear_scheduled_messages()
 
     return assert_true(queue.size() == 2 and queue.has_message("normal1") and queue.has_message("normal2"), "Expected main queue to remain intact after clearing delayed messages")
 
@@ -1393,7 +1393,7 @@ func test_clear_delayed_messages_prevents_future_enqueue() -> GDTestResult:
     queue.enqueue_after_ms(Message.new("delayed1"), 50)
     queue.enqueue_after_ms(Message.new("delayed2"), 100)
 
-    queue.clear_delayed_messages()
+    queue.clear_scheduled_messages()
 
     # Wait for the delay to pass
     var start_time: int = Time.get_ticks_msec()
@@ -1432,7 +1432,7 @@ func test_remove_delayed_messages_in_stage_does_not_affect_main() -> GDTestResul
     queue.enqueue(normal_msg)
     queue.enqueue_after_ms(delayed_msg, 100)
 
-    queue.remove_delayed_messages_in_stage(1)
+    queue.remove_scheduled_messages_in_stage(1)
 
     # Verify main queue still has the message
     if queue.size() != 1:
@@ -1462,7 +1462,7 @@ func test_remove_delayed_messages_in_stage_multiple_stages() -> GDTestResult:
     queue.enqueue_after_ms(delayed2, 100)
     queue.enqueue_after_ms(delayed3, 100)
 
-    queue.remove_delayed_messages_in_stage(1)
+    queue.remove_scheduled_messages_in_stage(1)
 
     # Wait for delay
     var start_time: int = Time.get_ticks_msec()
@@ -1501,7 +1501,7 @@ func test_remove_delayed_messages_with_id_does_not_affect_main() -> GDTestResult
     queue.enqueue(Message.new("target_id"))
     queue.enqueue_after_ms(Message.new("target_id"), 100)
 
-    queue.remove_delayed_messages_with_id("target_id")
+    queue.remove_scheduled_messages_with_id("target_id")
 
     # Main queue should still have the message
     if queue.size() != 1:
@@ -1523,7 +1523,7 @@ func test_remove_delayed_messages_with_id_multiple_ids() -> GDTestResult:
     queue.enqueue_after_ms(Message.new("id3"), 100)
     queue.enqueue_after_ms(Message.new("id2"), 100)  # Duplicate
 
-    queue.remove_delayed_messages_with_id("id2")
+    queue.remove_scheduled_messages_with_id("id2")
 
     # Wait for delay
     var start_time: int = Time.get_ticks_msec()
@@ -1589,7 +1589,7 @@ func test_remove_stage_and_delayed_stage_independently() -> GDTestResult:
 
     # Remove stage 0 from both queues
     queue.remove_messages_in_stage(0)
-    queue.remove_delayed_messages_in_stage(0)
+    queue.remove_scheduled_messages_in_stage(0)
 
     # Main queue should only have stage 1
     if queue.size() != 1 or not queue.has_message("normal_s1"):
@@ -1622,30 +1622,30 @@ func test_remove_id_and_delayed_id_independently() -> GDTestResult:
     if queue.size() != 3:
         return fail_test("Expected 3 messages in queue, got " + str(queue.size()))
 
-    if queue._delayed_messages.size() != 4:
-        return fail_test("Expected 4 messages in delayed queue, got " + str(queue._delayed_messages.size()))
+    if queue._scheduled_messages.size() != 4:
+        return fail_test("Expected 4 messages in delayed queue, got " + str(queue._scheduled_messages.size()))
 
     # Remove "remove_me" from the actual queue
     queue.remove_messages_with_id("remove_me")
 
     # Verify delayed queue unaffected
-    if queue._delayed_messages.size() != 4:
-        return fail_test("Expected 4 messages in delayed queue, got " + str(queue._delayed_messages.size()))
+    if queue._scheduled_messages.size() != 4:
+        return fail_test("Expected 4 messages in delayed queue, got " + str(queue._scheduled_messages.size()))
 
     # Add it back, then remove from the _delayed_ queue
     queue.enqueue(Message.new("remove_me"))
-    queue.remove_delayed_messages_with_id("remove_me")
+    queue.remove_scheduled_messages_with_id("remove_me")
 
     if not queue.has_message("remove_me"):
         return fail_test("Expected remove_me to be in main queue")
 
     # Verify delayed queue had the message removed
-    if queue.has_delayed_message("remove_me"):
+    if queue.has_scheduled_message("remove_me"):
         return fail_test("Expected remove_me to be removed from delayed queue")
 
     # Verify delayed queue has the remaining messages
-    if queue._delayed_messages.size() != 2:
-        return fail_test("Expected 2 messages in delayed queue, got " + str(queue._delayed_messages.size()))
+    if queue._scheduled_messages.size() != 2:
+        return fail_test("Expected 2 messages in delayed queue, got " + str(queue._scheduled_messages.size()))
 
     # Wait 100ms + 3 frames to make sure the delayed messages are enqueued
     var start_time: int = Time.get_ticks_msec()
@@ -1655,8 +1655,8 @@ func test_remove_id_and_delayed_id_independently() -> GDTestResult:
         await Engine.get_main_loop().process_frame
 
     # Verify delayed queue now empty
-    if queue._delayed_messages.size() != 0:
-        return fail_test("Expected delayed queue to be empty, got " + str(queue._delayed_messages.size()))
+    if queue._scheduled_messages.size() != 0:
+        return fail_test("Expected delayed queue to be empty, got " + str(queue._scheduled_messages.size()))
 
     # Verify main queue has all remaining messages (including the one that was added back)
     if queue.size() != 5:
@@ -1672,7 +1672,7 @@ func test_clear_empty_delayed_messages() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
     queue.enqueue(Message.new("normal"))
-    queue.clear_delayed_messages()
+    queue.clear_scheduled_messages()
 
     return assert_equal(1, queue.size(), "Expected clearing empty delayed queue to not affect main queue")
 
@@ -1684,7 +1684,7 @@ func test_remove_delayed_messages_nonexistent_stage() -> GDTestResult:
     delayed.stage = 1
 
     queue.enqueue_after_ms(delayed, 100)
-    queue.remove_delayed_messages_in_stage(99)
+    queue.remove_scheduled_messages_in_stage(99)
 
     # Wait for delayed message
     var start_time: int = Time.get_ticks_msec()
@@ -1698,7 +1698,7 @@ func test_remove_delayed_messages_nonexistent_id() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
     queue.enqueue_after_ms(Message.new("delayed"), 100)
-    queue.remove_delayed_messages_with_id("nonexistent")
+    queue.remove_scheduled_messages_with_id("nonexistent")
 
     # Wait for delayed message
     var start_time: int = Time.get_ticks_msec()
@@ -1757,7 +1757,7 @@ func test_freeze_delayed_messages_scheduled_but_not_enqueued() -> GDTestResult:
     queue.enqueue_after_ms(Message.new("delayed"), 50)
 
     # Verify it's in delayed messages
-    if not queue.has_delayed_message("delayed"):
+    if not queue.has_scheduled_message("delayed"):
         return fail_test("Expected delayed message to be scheduled")
 
     # Wait for it to become due
@@ -2055,7 +2055,7 @@ func test_freeze_blocking_allows_delayed_scheduling() -> GDTestResult:
     queue.freeze_blocking()
     queue.enqueue_after_ms(Message.new("delayed"), 100)
 
-    return assert_true(queue.has_delayed_message("delayed"), "Expected FROZEN_BLOCKING to still allow scheduling delayed messages")
+    return assert_true(queue.has_scheduled_message("delayed"), "Expected FROZEN_BLOCKING to still allow scheduling delayed messages")
 
 
 func test_freeze_respects_deduplication_policy_never() -> GDTestResult:
@@ -2507,7 +2507,7 @@ func test_freeze_with_clear_delayed_and_buffer() -> GDTestResult:
     queue.enqueue_after_ms(Message.new("delayed"), 50)
 
     # Clear delayed messages
-    queue.clear_delayed_messages()
+    queue.clear_scheduled_messages()
 
     # Wait to make sure delayed doesn't get enqueued
     var start_time: int = Time.get_ticks_msec()

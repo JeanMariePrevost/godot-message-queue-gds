@@ -19,7 +19,7 @@ var _frozen_state_message_buffer: Array[Message]
 
 ## The internal list of messages "queued to be enqueued"
 ## E.g. messages added through `enqueue_after_ms` or `enqueue_after_frames`
-var _delayed_messages: Array[Message]
+var _scheduled_messages: Array[Message]
 
 ## Default deduplication policy for _messages in this queue.
 ## If true, only 1 message of any given id can exist in the queue at any time.
@@ -44,28 +44,28 @@ var warn_on_frozen_blocking_enqueue: bool = true
 ## Creates a new empty MessageQueue.
 func _init() -> void:
     _messages = []
-    _delayed_messages = []
+    _scheduled_messages = []
     _frozen_state_message_buffer = []
     Engine.get_main_loop().process_frame.connect(_on_process_frame)
 
 
 ## Internally used for dlays and other self-managed features.
 func _on_process_frame() -> void:
-    _process_delayed_messages()
+    _process_scheduled_messages()
 
 
-## Checks if any delayed messages are due to be enqueued and enqueues them if so.
-func _process_delayed_messages() -> void:
-    ## Go through the delayed messages and enqueue them if the time has come.
-    for i in range(_delayed_messages.size() - 1, -1, -1):  # iterate backwards to safely remove
-        var message: Message = _delayed_messages[i]
+## Checks if any scheduled messages are due to be enqueued and enqueues them if so.
+func _process_scheduled_messages() -> void:
+    ## Go through the scheduled messages and enqueue them if the time has come.
+    for i in range(_scheduled_messages.size() - 1, -1, -1):  # iterate backwards to safely remove
+        var message: Message = _scheduled_messages[i]
         if message.internal_enqueue_after_timestamp >= 0 and message.internal_enqueue_after_timestamp <= Time.get_ticks_msec():
             enqueue(message)
-            _delayed_messages.remove_at(i)
+            _scheduled_messages.remove_at(i)
             continue
         if message.internal_enqueue_after_frame_stamp >= 0 and message.internal_enqueue_after_frame_stamp <= Engine.get_process_frames():
             enqueue(message)
-            _delayed_messages.remove_at(i)
+            _scheduled_messages.remove_at(i)
             continue
 
 
@@ -103,13 +103,13 @@ func enqueue(new_message: Message) -> void:
 ## Buffers a message to be enqueued after a number of milliseconds, in real time.
 func enqueue_after_ms(new_message: Message, ms: int) -> void:
     new_message.internal_enqueue_after_timestamp = Time.get_ticks_msec() + ms
-    _delayed_messages.append(new_message)
+    _scheduled_messages.append(new_message)
 
 
 ## Buffers a message to be enqueued after a number of frames, in engine time.
 func enqueue_after_frames(new_message: Message, frames: int) -> void:
     new_message.internal_enqueue_after_frame_stamp = Engine.get_process_frames() + frames
-    _delayed_messages.append(new_message)
+    _scheduled_messages.append(new_message)
 
 
 ## Total count of _messages in the queue.
@@ -123,44 +123,44 @@ func is_empty() -> bool:
 
 
 ## Remove all _messages from the queue.
-## Does not affect delayed messages.
+## Does not affect scheduled messages.
 func clear() -> void:
     _messages.clear()
 
 
-## Clears all delayed messages.
+## Clears all scheduled messages.
 ## Does not affect the main queue.
-func clear_delayed_messages() -> void:
-    _delayed_messages.clear()
+func clear_scheduled_messages() -> void:
+    _scheduled_messages.clear()
 
 
 ## Remove all _messages of a given stage from the queue.
-## Does not affect delayed messages.
+## Does not affect scheduled messages.
 func remove_messages_in_stage(stage: int) -> void:
     _messages = _messages.filter(func(m: Message) -> bool: return m.stage != stage)
 
 
-## Remove all delayed messages of a given stage that aren't yet enqueued.
+## Remove all scheduled messages of a given stage that aren't yet enqueued.
 ## Does not affect the main queue.
-func remove_delayed_messages_in_stage(stage: int) -> void:
-    _delayed_messages = _delayed_messages.filter(func(m: Message) -> bool: return m.stage != stage)
+func remove_scheduled_messages_in_stage(stage: int) -> void:
+    _scheduled_messages = _scheduled_messages.filter(func(m: Message) -> bool: return m.stage != stage)
 
 
 ## Remove all _messages with a given id from the queue.
-## Does not affect delayed messages.
+## Does not affect scheduled messages.
 func remove_messages_with_id(id: String) -> void:
     _messages = _messages.filter(func(m: Message) -> bool: return m.id != id)
 
 
-## Remove all delayed messages with a given id that aren't yet enqueued.
+## Remove all scheduled messages with a given id that aren't yet enqueued.
 ## Does not affect the main queue.
-func remove_delayed_messages_with_id(id: String) -> void:
-    _delayed_messages = _delayed_messages.filter(func(m: Message) -> bool: return m.id != id)
+func remove_scheduled_messages_with_id(id: String) -> void:
+    _scheduled_messages = _scheduled_messages.filter(func(m: Message) -> bool: return m.id != id)
 
 
 ## Remove duplicate _messages from the queue, regardless of the deduplication policy.
 ## Can optionally respect the "NEVER" deduplication policy set at the message level.
-## Does not affect delayed messages, which technically aren't part of the queue yet.
+## Does not affect scheduled messages, which technically aren't part of the queue yet.
 func remove_duplicates(respect_never_policy: bool = false) -> void:
     var seen: Dictionary = {}
     # iterate backwards to safely remove
@@ -174,7 +174,7 @@ func remove_duplicates(respect_never_policy: bool = false) -> void:
 
 ## Remove duplicate _messages with a given id from the queue, regardless of the deduplication policy.
 ## Can optionally respect the "NEVER" deduplication policy set at the message level.
-## Does not affect delayed messages, which technically aren't part of the queue yet.
+## Does not affect scheduled messages, which technically aren't part of the queue yet.
 func remove_duplicates_with_id(id: String, respect_never_policy: bool = false) -> void:
     var have_nevers_to_keep: bool = false
 
@@ -254,9 +254,9 @@ func has_message(id: String) -> bool:
     return false
 
 
-## Checks whether a message with a given id is in the delayed messages.
-func has_delayed_message(id: String) -> bool:
-    for message in _delayed_messages:
+## Checks whether a message with a given id is in the scheduled messages.
+func has_scheduled_message(id: String) -> bool:
+    for message in _scheduled_messages:
         if message.id == id:
             return true
     return false
@@ -265,13 +265,13 @@ func has_delayed_message(id: String) -> bool:
 ## Freezes the queue, preventing new enqueues until it is unfrozen.
 ## The queue can still be dequeued from.
 ## For example, if you want to process all messages received in the last frame, you can freeze, drain the queue, and then unfreeze to prevent reentrancy.
-## Delayed messages can still be scheduled, but will not be enqueued until the queue is unfrozen.
+## Messages can still be scheduled, but will not be enqueued until the queue is unfrozen.
 func freeze() -> void:
     _state = QueueState.FROZEN
 
 
 ## Like `freeze()`, but drops all new enqueues instead of buffering them.
-## Delayed messages can still be scheduled, but will be dropped if they are due to be enqueued while in this _state.
+## Mssages can still be scheduled, but will be dropped if they are due to be enqueued while in this _state.
 func freeze_blocking() -> void:
     _state = QueueState.FROZEN_BLOCKING
 
@@ -288,7 +288,7 @@ func unfreeze() -> void:
     _frozen_state_message_buffer.clear()
 
     # And also check if any delayed messages are due to be enqueued
-    _process_delayed_messages()
+    _process_scheduled_messages()
 
 
 ## String representation of the queue (front displayed at the left).
