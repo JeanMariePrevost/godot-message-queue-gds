@@ -5,8 +5,17 @@
 extends RefCounted
 class_name MessageQueue
 
+enum QueueState {
+    NORMAL,  ## Accepts all modifications (enqueue, dequeue, etc.)
+    FROZEN,  ## New enqueues are accepted, but buffered to a separate queue until the queue is unfrozen
+    FROZEN_BLOCKING,  ## New enqueues are dropped
+}
+
 ## The internal list of _messages in the queue.
 var _messages: Array[Message]
+
+## The internal list of messages that have been added to the queue while _state == QueueState.FROZEN.
+var _frozen_state_message_buffer: Array[Message]
 
 ## The internal list of messages "queued to be enqueued"
 ## E.g. messages added through `enqueue_after_ms` or `enqueue_after_frames`
@@ -25,23 +34,34 @@ var deduplicate: bool:
             # Re-apply deduplication now since duplicates might have been introduced
             remove_duplicates(true)
 
+## Whether the queue is currently isolate and pushing new enqueues to a buffer or dropping them entirely.
+var _state: QueueState = QueueState.NORMAL
+
+## Whether to warn when a message is dropped from being enqueued while the queue is FROZEN_BLOCKING.
+var warn_on_frozen_blocking_enqueue: bool = true
+
 
 ## Creates a new empty MessageQueue.
 func _init() -> void:
     _messages = []
     _delayed_messages = []
+    _frozen_state_message_buffer = []
     Engine.get_main_loop().process_frame.connect(_on_process_frame)
 
 
 ## Internally used for dlays and other self-managed features.
 func _on_process_frame() -> void:
+    _process_delayed_messages()
+
+
+## Checks if any delayed messages are due to be enqueued and enqueues them if so.
+func _process_delayed_messages() -> void:
     ## Go through the delayed messages and enqueue them if the time has come.
     for i in range(_delayed_messages.size() - 1, -1, -1):  # iterate backwards to safely remove
         var message: Message = _delayed_messages[i]
         if message.internal_enqueue_after_timestamp >= 0 and message.internal_enqueue_after_timestamp <= Time.get_ticks_msec():
             enqueue(message)
             _delayed_messages.remove_at(i)
-            print("Enqueued message: ", message.id)
             continue
         if message.internal_enqueue_after_frame_stamp >= 0 and message.internal_enqueue_after_frame_stamp <= Engine.get_process_frames():
             enqueue(message)
@@ -51,6 +71,14 @@ func _on_process_frame() -> void:
 
 ## Enqueue a message to the back of the queue.
 func enqueue(new_message: Message) -> void:
+    if _state == QueueState.FROZEN:
+        _frozen_state_message_buffer.append(new_message)
+        return
+    if _state == QueueState.FROZEN_BLOCKING:
+        if warn_on_frozen_blocking_enqueue:
+            push_warning("Tried to enqueue a message while the queue is FROZEN_BLOCKING. Message was dropped. Message: ", new_message.id)
+        return
+
     var m_stage: int = new_message.stage
     var m_priority: int = new_message.priority
     var m_deduplicate: Message.DuplicatePolicy = new_message.deduplicate
@@ -234,6 +262,35 @@ func has_delayed_message(id: String) -> bool:
     return false
 
 
+## Freezes the queue, preventing new enqueues until it is unfrozen.
+## The queue can still be dequeued from.
+## For example, if you want to process all messages received in the last frame, you can freeze, drain the queue, and then unfreeze to prevent reentrancy.
+## Delayed messages can still be scheduled, but will not be enqueued until the queue is unfrozen.
+func freeze() -> void:
+    _state = QueueState.FROZEN
+
+
+## Like `freeze()`, but drops all new enqueues instead of buffering them.
+## Delayed messages can still be scheduled, but will be dropped if they are due to be enqueued while in this _state.
+func freeze_blocking() -> void:
+    _state = QueueState.FROZEN_BLOCKING
+
+
+## Unfreezes the queue, allowing new enqueues to be processed normally.
+## This is the default _state.
+func unfreeze() -> void:
+    _state = QueueState.NORMAL
+
+    ## Now try to enqueue all the buffered messages
+    for message in _frozen_state_message_buffer:
+        enqueue(message)
+
+    _frozen_state_message_buffer.clear()
+
+    # And also check if any delayed messages are due to be enqueued
+    _process_delayed_messages()
+
+
 ## String representation of the queue (front displayed at the left).
 func _to_string() -> String:
     ## TODO: Implement this properly
@@ -243,6 +300,8 @@ func _to_string() -> String:
 # Custom iterator implementation
 # (To allow for-in loops)
 # =======================================
+
+# TODO: Implement iteration? Not relevant for a message queue? Or should it dequeue messages as it iterates?
 
 # func _iter_init(_arg) -> bool:
 #     _iter_index = 0

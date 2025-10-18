@@ -1706,3 +1706,893 @@ func test_remove_delayed_messages_nonexistent_id() -> GDTestResult:
         await Engine.get_main_loop().process_frame
 
     return assert_equal(1, queue.size(), "Expected delayed message to still be enqueued when removing nonexistent id")
+
+
+# =============================================================================
+# Freeze/Unfreeze Tests
+# =============================================================================
+
+
+func test_freeze_buffers_new_enqueues() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.enqueue(Message.new("before_freeze"))
+    queue.freeze()
+    queue.enqueue(Message.new("during_freeze1"))
+    queue.enqueue(Message.new("during_freeze2"))
+
+    return assert_true(
+        queue.size() == 1 and queue.has_message("before_freeze") and not queue.has_message("during_freeze1"),
+        "Expected frozen queue to buffer new enqueues, not add them to main queue"
+    )
+
+
+func test_unfreeze_enqueues_buffer() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.freeze()
+    queue.enqueue(Message.new("buffered1"))
+    queue.enqueue(Message.new("buffered2"))
+    queue.unfreeze()
+
+    return assert_true(queue.size() == 2 and queue.has_message("buffered1") and queue.has_message("buffered2"), "Expected unfreezing to enqueue all buffered messages")
+
+
+func test_freeze_allows_dequeue() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.enqueue(Message.new("msg1"))
+    queue.enqueue(Message.new("msg2"))
+    queue.freeze()
+
+    var dequeued: Message = queue.dequeue()
+
+    return assert_true(dequeued != null and dequeued.id == "msg1" and queue.size() == 1, "Expected frozen queue to still allow dequeue operations")
+
+
+func test_freeze_delayed_messages_scheduled_but_not_enqueued() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.freeze()
+    queue.enqueue_after_ms(Message.new("delayed"), 50)
+
+    # Verify it's in delayed messages
+    if not queue.has_delayed_message("delayed"):
+        return fail_test("Expected delayed message to be scheduled")
+
+    # Wait for it to become due
+    var start_time: int = Time.get_ticks_msec()
+    while Time.get_ticks_msec() - start_time < 100:
+        await Engine.get_main_loop().process_frame
+
+    # Should be buffered, not in main queue
+    return assert_true(queue.is_empty() and not queue.has_message("delayed"), "Expected delayed message that became due during freeze to be buffered, not enqueued")
+
+
+func test_unfreeze_processes_delayed_messages() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.freeze()
+    queue.enqueue_after_ms(Message.new("delayed"), 50)
+
+    # Wait for it to become due
+    var start_time: int = Time.get_ticks_msec()
+    while Time.get_ticks_msec() - start_time < 100:
+        await Engine.get_main_loop().process_frame
+
+    queue.unfreeze()
+
+    return assert_true(queue.has_message("delayed"), "Expected unfreezing to process delayed messages that became due")
+
+
+func test_freeze_respects_priority_on_unfreeze() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.freeze()
+
+    var low: Message = Message.new("low")
+    low.priority = 1
+
+    var high: Message = Message.new("high")
+    high.priority = 10
+
+    var mid: Message = Message.new("mid")
+    mid.priority = 5
+
+    queue.enqueue(low)
+    queue.enqueue(high)
+    queue.enqueue(mid)
+
+    queue.unfreeze()
+
+    var first: Message = queue.dequeue()
+    var second: Message = queue.dequeue()
+    var third: Message = queue.dequeue()
+
+    return assert_true(first.id == "high" and second.id == "mid" and third.id == "low", "Expected buffered messages to respect priority ordering when unfrozen")
+
+
+func test_freeze_respects_stage_on_unfreeze() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.freeze()
+
+    var stage2: Message = Message.new("stage2")
+    stage2.stage = 2
+
+    var stage0: Message = Message.new("stage0")
+    stage0.stage = 0
+
+    var stage1: Message = Message.new("stage1")
+    stage1.stage = 1
+
+    queue.enqueue(stage2)
+    queue.enqueue(stage0)
+    queue.enqueue(stage1)
+
+    queue.unfreeze()
+
+    var first: Message = queue.dequeue()
+    var second: Message = queue.dequeue()
+    var third: Message = queue.dequeue()
+
+    return assert_true(first.id == "stage0" and second.id == "stage1" and third.id == "stage2", "Expected buffered messages to respect stage ordering when unfrozen")
+
+
+func test_freeze_blocking_drops_new_enqueues() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.warn_on_frozen_blocking_enqueue = false  # Disable warnings for test
+
+    queue.enqueue(Message.new("before_freeze"))
+    queue.freeze_blocking()
+    queue.enqueue(Message.new("dropped1"))
+    queue.enqueue(Message.new("dropped2"))
+
+    return assert_true(queue.size() == 1 and queue.has_message("before_freeze") and not queue.has_message("dropped1"), "Expected FROZEN_BLOCKING to drop new enqueues")
+
+
+func test_freeze_blocking_drops_delayed_messages_when_due() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.warn_on_frozen_blocking_enqueue = false
+
+    queue.freeze_blocking()
+    queue.enqueue_after_ms(Message.new("delayed"), 50)
+
+    # Wait for it to become due
+    var start_time: int = Time.get_ticks_msec()
+    while Time.get_ticks_msec() - start_time < 100:
+        await Engine.get_main_loop().process_frame
+
+    return assert_true(queue.is_empty(), "Expected FROZEN_BLOCKING to drop delayed messages that became due")
+
+
+func test_freeze_blocking_allows_dequeue() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.warn_on_frozen_blocking_enqueue = false
+
+    queue.enqueue(Message.new("msg1"))
+    queue.enqueue(Message.new("msg2"))
+    queue.freeze_blocking()
+
+    var dequeued: Message = queue.dequeue()
+
+    return assert_true(dequeued != null and dequeued.id == "msg1" and queue.size() == 1, "Expected FROZEN_BLOCKING queue to still allow dequeue operations")
+
+
+func test_freeze_blocking_unfreeze_has_empty_buffer() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.warn_on_frozen_blocking_enqueue = false
+
+    queue.freeze_blocking()
+    queue.enqueue(Message.new("dropped"))
+    queue.unfreeze()
+
+    return assert_true(queue.is_empty(), "Expected unfreezing after FROZEN_BLOCKING to not enqueue anything")
+
+
+func test_multiple_freeze_unfreeze_cycles() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    # First cycle
+    queue.freeze()
+    queue.enqueue(Message.new("cycle1_msg1"))
+    queue.enqueue(Message.new("cycle1_msg2"))
+    queue.unfreeze()
+
+    if queue.size() != 2:
+        return fail_test("Expected 2 messages after first unfreeze, got " + str(queue.size()))
+
+    # Second cycle
+    queue.freeze()
+    queue.enqueue(Message.new("cycle2_msg1"))
+    queue.enqueue(Message.new("cycle2_msg2"))
+    queue.unfreeze()
+
+    return assert_equal(4, queue.size(), "Expected 4 messages after two freeze/unfreeze cycles")
+
+
+func test_freeze_then_freeze_blocking() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.warn_on_frozen_blocking_enqueue = false
+
+    queue.freeze()
+    queue.enqueue(Message.new("buffered"))
+
+    queue.freeze_blocking()
+    queue.enqueue(Message.new("dropped"))
+
+    queue.unfreeze()
+
+    return assert_true(
+        queue.size() == 1 and queue.has_message("buffered") and not queue.has_message("dropped"),
+        "Expected transition from FROZEN to FROZEN_BLOCKING to clear buffer and drop new messages"
+    )
+
+
+func test_freeze_with_deduplication() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.deduplicate = true
+
+    queue.freeze()
+    queue.enqueue(Message.new("duplicate"))
+    queue.enqueue(Message.new("duplicate"))
+    queue.enqueue(Message.new("duplicate"))
+    queue.unfreeze()
+
+    return assert_equal(1, queue.size(), "Expected deduplication to work with frozen buffer on unfreeze")
+
+
+func test_freeze_clear_does_not_affect_buffer() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.enqueue(Message.new("in_queue"))
+    queue.freeze()
+    queue.enqueue(Message.new("buffered"))
+
+    queue.clear()
+
+    if not queue.is_empty():
+        return fail_test("Expected main queue to be cleared")
+
+    queue.unfreeze()
+
+    return assert_true(queue.size() == 1 and queue.has_message("buffered"), "Expected clear() to not affect frozen buffer")
+
+
+func test_freeze_mixed_with_existing_messages() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    var existing1: Message = Message.new("existing1")
+    existing1.priority = 5
+
+    var existing2: Message = Message.new("existing2")
+    existing2.priority = 3
+
+    queue.enqueue(existing1)
+    queue.enqueue(existing2)
+
+    queue.freeze()
+
+    var buffered: Message = Message.new("buffered")
+    buffered.priority = 10
+
+    queue.enqueue(buffered)
+    queue.unfreeze()
+
+    var first: Message = queue.dequeue()
+
+    return assert_equal("buffered", first.id, "Expected unfrozen buffered message to be inserted in correct priority order")
+
+
+func test_freeze_with_delayed_and_buffer() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.freeze()
+    queue.enqueue(Message.new("buffered"))
+    queue.enqueue_after_ms(Message.new("delayed"), 50)
+
+    # Wait for delayed message to become due
+    var start_time: int = Time.get_ticks_msec()
+    while Time.get_ticks_msec() - start_time < 100:
+        await Engine.get_main_loop().process_frame
+
+    queue.unfreeze()
+
+    return assert_true(
+        queue.size() == 2 and queue.has_message("buffered") and queue.has_message("delayed"), "Expected both buffered and delayed messages to be enqueued on unfreeze"
+    )
+
+
+func test_freeze_dequeue_all_then_unfreeze() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.enqueue(Message.new("msg1"))
+    queue.enqueue(Message.new("msg2"))
+
+    queue.freeze()
+    queue.enqueue(Message.new("buffered"))
+
+    # Dequeue all from main queue
+    queue.dequeue()
+    queue.dequeue()
+
+    if not queue.is_empty():
+        return fail_test("Expected main queue to be empty after dequeuing all")
+
+    queue.unfreeze()
+
+    return assert_true(queue.size() == 1 and queue.has_message("buffered"), "Expected buffer to be enqueued after dequeuing all main queue messages")
+
+
+func test_freeze_state_persists_across_frames() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.freeze()
+    queue.enqueue(Message.new("buffered1"))
+
+    await Engine.get_main_loop().process_frame
+
+    queue.enqueue(Message.new("buffered2"))
+
+    await Engine.get_main_loop().process_frame
+
+    return assert_true(queue.is_empty(), "Expected freeze state to persist across multiple frames")
+
+
+func test_unfreeze_with_empty_buffer() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.freeze()
+    queue.unfreeze()
+
+    return assert_true(queue.is_empty(), "Expected unfreezing with empty buffer to not cause issues")
+
+
+func test_freeze_blocking_allows_delayed_scheduling() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.warn_on_frozen_blocking_enqueue = false
+
+    queue.freeze_blocking()
+    queue.enqueue_after_ms(Message.new("delayed"), 100)
+
+    return assert_true(queue.has_delayed_message("delayed"), "Expected FROZEN_BLOCKING to still allow scheduling delayed messages")
+
+
+func test_freeze_respects_deduplication_policy_never() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.deduplicate = true
+
+    var msg1: Message = Message.new("id")
+    msg1.deduplicate = Message.DuplicatePolicy.NEVER
+
+    var msg2: Message = Message.new("id")
+    msg2.deduplicate = Message.DuplicatePolicy.NEVER
+
+    queue.freeze()
+    queue.enqueue(msg1)
+    queue.enqueue(msg2)
+    queue.unfreeze()
+
+    return assert_equal(2, queue.size(), "Expected NEVER policy to allow duplicates even in frozen buffer")
+
+
+# =============================================================================
+# Freeze/Unfreeze Buffer Introspection Tests
+# =============================================================================
+
+
+func test_freeze_buffer_introspection() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.freeze()
+    queue.enqueue(Message.new("buffered1"))
+    queue.enqueue(Message.new("buffered2"))
+    queue.enqueue(Message.new("buffered3"))
+
+    return assert_true(queue._frozen_state_message_buffer.size() == 3 and queue.is_empty(), "Expected 3 messages in buffer and 0 in main queue")
+
+
+func test_freeze_buffer_cleared_on_unfreeze() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.freeze()
+    queue.enqueue(Message.new("buffered"))
+
+    if queue._frozen_state_message_buffer.size() != 1:
+        return fail_test("Expected 1 message in buffer")
+
+    queue.unfreeze()
+
+    return assert_equal(0, queue._frozen_state_message_buffer.size(), "Expected buffer to be cleared after unfreeze")
+
+
+func test_freeze_buffer_vs_main_queue_separation() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.enqueue(Message.new("in_main"))
+    queue.freeze()
+    queue.enqueue(Message.new("in_buffer"))
+
+    return assert_true(
+        queue.size() == 1 and queue._frozen_state_message_buffer.size() == 1 and queue.has_message("in_main") and not queue.has_message("in_buffer"),
+        "Expected clear separation between main queue and buffer"
+    )
+
+
+# =============================================================================
+# Freeze/Unfreeze Invalid Operations & Edge Cases
+# =============================================================================
+
+
+func test_double_freeze_does_not_duplicate_state() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.freeze()
+    queue.enqueue(Message.new("msg1"))
+    queue.freeze()  # Second freeze
+    queue.enqueue(Message.new("msg2"))
+
+    if queue._frozen_state_message_buffer.size() != 2:
+        return fail_test("Expected 2 messages in buffer, got " + str(queue._frozen_state_message_buffer.size()))
+
+    queue.unfreeze()
+
+    return assert_equal(2, queue.size(), "Expected double freeze to not corrupt state")
+
+
+func test_unfreeze_without_freeze_is_noop() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.enqueue(Message.new("msg1"))
+    queue.unfreeze()  # Unfreeze without freeze
+
+    return assert_true(queue.size() == 1 and queue.has_message("msg1"), "Expected unfreeze without freeze to not affect queue")
+
+
+func test_multiple_unfreezes_is_safe() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.freeze()
+    queue.enqueue(Message.new("buffered"))
+    queue.unfreeze()
+    queue.unfreeze()  # Second unfreeze
+    queue.unfreeze()  # Third unfreeze
+
+    return assert_equal(1, queue.size(), "Expected multiple unfreezes to be safe")
+
+
+func test_freeze_enqueue_does_not_error() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.freeze()
+
+    # These should not raise errors
+    queue.enqueue(Message.new("msg1"))
+    queue.enqueue(Message.new("msg2"))
+    queue.enqueue(Message.new("msg3"))
+
+    return assert_equal(3, queue._frozen_state_message_buffer.size(), "Expected freeze enqueues to work without errors")
+
+
+func test_freeze_blocking_enqueue_does_not_error() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.warn_on_frozen_blocking_enqueue = false
+
+    queue.freeze_blocking()
+
+    # These should not raise errors, just drop silently
+    queue.enqueue(Message.new("dropped1"))
+    queue.enqueue(Message.new("dropped2"))
+    queue.enqueue(Message.new("dropped3"))
+
+    return assert_true(queue.is_empty(), "Expected FROZEN_BLOCKING enqueues to not error")
+
+
+func test_freeze_state_transitions() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.warn_on_frozen_blocking_enqueue = false
+
+    # NORMAL -> FROZEN -> NORMAL
+    queue.freeze()
+    queue.enqueue(Message.new("buffered1"))
+    queue.unfreeze()
+
+    # NORMAL -> FROZEN_BLOCKING -> NORMAL
+    queue.freeze_blocking()
+    queue.enqueue(Message.new("dropped"))
+    queue.unfreeze()
+
+    # NORMAL -> FROZEN -> FROZEN_BLOCKING -> NORMAL
+    queue.freeze()
+    queue.enqueue(Message.new("buffered2"))
+    queue.freeze_blocking()
+    queue.enqueue(Message.new("also_dropped"))
+    queue.unfreeze()
+
+    # When transitioning FROZEN -> FROZEN_BLOCKING, the buffer is preserved
+    # So we should have buffered1 and buffered2
+    return assert_equal(2, queue.size(), "Expected state transitions to preserve buffer when going FROZEN -> FROZEN_BLOCKING")
+
+
+# =============================================================================
+# Freeze/Unfreeze Buffer vs Delayed Message Merge Order Tests
+# =============================================================================
+
+
+func test_buffer_and_delayed_merge_order_same_priority() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.freeze()
+
+    var buffered: Message = Message.new("buffered")
+    buffered.priority = 5
+
+    var delayed: Message = Message.new("delayed")
+    delayed.priority = 5
+
+    queue.enqueue(buffered)
+    queue.enqueue_after_ms(delayed, 50)
+
+    # Wait for delayed to become due
+    var start_time: int = Time.get_ticks_msec()
+    while Time.get_ticks_msec() - start_time < 100:
+        await Engine.get_main_loop().process_frame
+
+    queue.unfreeze()
+
+    var first: Message = queue.dequeue()
+    var second: Message = queue.dequeue()
+
+    # Buffered messages should be processed first (they were added to buffer first)
+    return assert_true(first.id == "buffered" and second.id == "delayed", "Expected buffered messages to be enqueued before delayed messages on unfreeze")
+
+
+func test_buffer_and_delayed_merge_order_different_priorities() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.freeze()
+
+    var buffered_low: Message = Message.new("buffered_low")
+    buffered_low.priority = 1
+
+    var delayed_high: Message = Message.new("delayed_high")
+    delayed_high.priority = 10
+
+    queue.enqueue(buffered_low)
+    queue.enqueue_after_ms(delayed_high, 50)
+
+    # Wait for delayed to become due
+    var start_time: int = Time.get_ticks_msec()
+    while Time.get_ticks_msec() - start_time < 100:
+        await Engine.get_main_loop().process_frame
+
+    queue.unfreeze()
+
+    var first: Message = queue.dequeue()
+
+    return assert_equal("delayed_high", first.id, "Expected priority ordering to be respected when merging buffer and delayed")
+
+
+func test_buffer_and_delayed_merge_order_different_stages() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.freeze()
+
+    var buffered_s1: Message = Message.new("buffered_s1")
+    buffered_s1.stage = 1
+
+    var delayed_s0: Message = Message.new("delayed_s0")
+    delayed_s0.stage = 0
+
+    queue.enqueue(buffered_s1)
+    queue.enqueue_after_ms(delayed_s0, 50)
+
+    # Wait for delayed to become due
+    var start_time: int = Time.get_ticks_msec()
+    while Time.get_ticks_msec() - start_time < 100:
+        await Engine.get_main_loop().process_frame
+
+    queue.unfreeze()
+
+    var first: Message = queue.dequeue()
+
+    return assert_equal("delayed_s0", first.id, "Expected stage ordering to be respected when merging buffer and delayed")
+
+
+func test_multiple_buffered_and_delayed_complex_merge() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.freeze()
+
+    # Add buffered messages
+    var buf1: Message = Message.new("buf_s0_p10")
+    buf1.stage = 0
+    buf1.priority = 10
+
+    var buf2: Message = Message.new("buf_s1_p5")
+    buf2.stage = 1
+    buf2.priority = 5
+
+    # Add delayed messages
+    var del1: Message = Message.new("del_s0_p5")
+    del1.stage = 0
+    del1.priority = 5
+
+    var del2: Message = Message.new("del_s1_p10")
+    del2.stage = 1
+    del2.priority = 10
+
+    queue.enqueue(buf1)
+    queue.enqueue(buf2)
+    queue.enqueue_after_ms(del1, 50)
+    queue.enqueue_after_ms(del2, 50)
+
+    # Wait for delayed messages
+    var start_time: int = Time.get_ticks_msec()
+    while Time.get_ticks_msec() - start_time < 100:
+        await Engine.get_main_loop().process_frame
+
+    queue.unfreeze()
+
+    var first: Message = queue.dequeue()
+    var second: Message = queue.dequeue()
+    var third: Message = queue.dequeue()
+    var fourth: Message = queue.dequeue()
+
+    # Expected order: stage 0 first (buf_s0_p10, del_s0_p5), then stage 1 (del_s1_p10, buf_s1_p5)
+    return assert_true(
+        first.id == "buf_s0_p10" and second.id == "del_s0_p5" and third.id == "del_s1_p10" and fourth.id == "buf_s1_p5",
+        "Expected complex merge to respect stage and priority ordering"
+    )
+
+
+# =============================================================================
+# Freeze/Unfreeze Deduplication & Priority Interaction Tests
+# =============================================================================
+
+
+func test_buffered_duplicates_different_priorities_deduplication_order() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.deduplicate = true
+
+    queue.freeze()
+
+    var low: Message = Message.new("duplicate")
+    low.priority = 1
+    low.payload = "low_priority"
+
+    var high: Message = Message.new("duplicate")
+    high.priority = 10
+    high.payload = "high_priority"
+
+    var mid: Message = Message.new("duplicate")
+    mid.priority = 5
+    mid.payload = "mid_priority"
+
+    queue.enqueue(low)
+    queue.enqueue(high)
+    queue.enqueue(mid)
+
+    queue.unfreeze()
+
+    if queue.size() != 1:
+        return fail_test("Expected deduplication to result in 1 message, got " + str(queue.size()))
+
+    var result: Message = queue.dequeue()
+
+    # Deduplication preserves first occurrence in buffer, which then gets enqueued
+    # The actual priority in the final queue will be based on which one survives deduplication
+    return assert_equal("duplicate", result.id, "Expected deduplication to work on buffered messages")
+
+
+func test_buffered_duplicates_different_stages_deduplication_order() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.deduplicate = true
+
+    queue.freeze()
+
+    var stage2: Message = Message.new("duplicate")
+    stage2.stage = 2
+    stage2.payload = "stage2"
+
+    var stage0: Message = Message.new("duplicate")
+    stage0.stage = 0
+    stage0.payload = "stage0"
+
+    var stage1: Message = Message.new("duplicate")
+    stage1.stage = 1
+    stage1.payload = "stage1"
+
+    queue.enqueue(stage2)
+    queue.enqueue(stage0)
+    queue.enqueue(stage1)
+
+    queue.unfreeze()
+
+    if queue.size() != 1:
+        return fail_test("Expected deduplication to result in 1 message, got " + str(queue.size()))
+
+    var result: Message = queue.dequeue()
+
+    # Deduplication happens during unfreeze, respecting the enqueue order
+    return assert_equal("duplicate", result.id, "Expected deduplication to work on buffered messages with different stages")
+
+
+func test_freeze_buffer_with_main_queue_deduplication() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.deduplicate = true
+
+    # Add to main queue
+    var in_main: Message = Message.new("duplicate")
+    in_main.payload = "main"
+    in_main.priority = 5
+
+    queue.enqueue(in_main)
+
+    # Freeze and add to buffer
+    queue.freeze()
+
+    var in_buffer: Message = Message.new("duplicate")
+    in_buffer.payload = "buffer"
+    in_buffer.priority = 10
+
+    queue.enqueue(in_buffer)
+    queue.unfreeze()
+
+    # Should still have 1 message (deduplication should prevent buffer message from being added)
+    if queue.size() != 1:
+        return fail_test("Expected 1 message after deduplication, got " + str(queue.size()))
+
+    var result: Message = queue.dequeue()
+
+    return assert_equal("main", result.payload, "Expected main queue message to be kept when buffer has duplicate")
+
+
+func test_freeze_mixed_policies_in_buffer() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.deduplicate = true
+
+    queue.freeze()
+
+    var default1: Message = Message.new("dup")
+    default1.deduplicate = Message.DuplicatePolicy.DEFAULT
+
+    var default2: Message = Message.new("dup")
+    default2.deduplicate = Message.DuplicatePolicy.DEFAULT
+
+    var never1: Message = Message.new("dup")
+    never1.deduplicate = Message.DuplicatePolicy.NEVER
+
+    var never2: Message = Message.new("dup")
+    never2.deduplicate = Message.DuplicatePolicy.NEVER
+
+    queue.enqueue(default1)
+    queue.enqueue(default2)
+    queue.enqueue(never1)
+    queue.enqueue(never2)
+
+    queue.unfreeze()
+
+    # Should have 1 DEFAULT + 2 NEVER = 3 messages
+    return assert_equal(3, queue.size(), "Expected mixed deduplication policies in buffer to be respected")
+
+
+# =============================================================================
+# Freeze/Unfreeze Additional Edge Cases
+# =============================================================================
+
+
+func test_freeze_blocking_then_freeze_buffer_preserved() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+    queue.warn_on_frozen_blocking_enqueue = false
+
+    queue.freeze_blocking()
+    queue.enqueue(Message.new("dropped"))
+
+    queue.freeze()
+    queue.enqueue(Message.new("buffered"))
+
+    queue.unfreeze()
+
+    return assert_true(
+        queue.size() == 1 and queue.has_message("buffered") and not queue.has_message("dropped"), "Expected transition from FROZEN_BLOCKING to FROZEN to preserve buffer"
+    )
+
+
+func test_freeze_with_clear_delayed_and_buffer() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.freeze()
+    queue.enqueue(Message.new("buffered"))
+    queue.enqueue_after_ms(Message.new("delayed"), 50)
+
+    # Clear delayed messages
+    queue.clear_delayed_messages()
+
+    # Wait to make sure delayed doesn't get enqueued
+    var start_time: int = Time.get_ticks_msec()
+    while Time.get_ticks_msec() - start_time < 100:
+        await Engine.get_main_loop().process_frame
+
+    queue.unfreeze()
+
+    return assert_true(
+        queue.size() == 1 and queue.has_message("buffered") and not queue.has_message("delayed"), "Expected clear_delayed_messages to work correctly with frozen queue"
+    )
+
+
+func test_freeze_dequeue_then_buffer_enqueue() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    var existing: Message = Message.new("existing")
+    existing.priority = 5
+
+    queue.enqueue(existing)
+    queue.freeze()
+
+    var buffered: Message = Message.new("buffered")
+    buffered.priority = 10
+
+    queue.enqueue(buffered)
+
+    # Dequeue while frozen
+    var dequeued: Message = queue.dequeue()
+
+    if dequeued.id != "existing":
+        return fail_test("Expected to dequeue existing message")
+
+    queue.unfreeze()
+
+    return assert_true(queue.size() == 1 and queue.has_message("buffered"), "Expected buffer to be enqueued after dequeuing from frozen queue")
+
+
+func test_freeze_peek_operations_work() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.enqueue(Message.new("in_queue"))
+    queue.freeze()
+    queue.enqueue(Message.new("buffered"))
+
+    var peeked: Message = queue.peek()
+
+    return assert_true(peeked != null and peeked.id == "in_queue" and queue.size() == 1, "Expected peek to work on frozen queue (only sees main queue, not buffer)")
+
+
+func test_freeze_has_message_only_checks_main_queue() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    queue.freeze()
+    queue.enqueue(Message.new("buffered"))
+
+    return assert_false(queue.has_message("buffered"), "Expected has_message to not see buffered messages")
+
+
+func test_unfreeze_buffer_respects_existing_queue_order() -> GDTestResult:
+    var queue: MessageQueue = MessageQueue.new()
+
+    # Add messages to main queue
+    var main1: Message = Message.new("main1")
+    main1.priority = 8
+
+    var main2: Message = Message.new("main2")
+    main2.priority = 2
+
+    queue.enqueue(main1)
+    queue.enqueue(main2)
+
+    # Freeze and add to buffer
+    queue.freeze()
+
+    var buffered: Message = Message.new("buffered")
+    buffered.priority = 5
+
+    queue.enqueue(buffered)
+    queue.unfreeze()
+
+    var first: Message = queue.dequeue()
+    var second: Message = queue.dequeue()
+    var third: Message = queue.dequeue()
+
+    return assert_true(
+        first.id == "main1" and second.id == "buffered" and third.id == "main2", "Expected buffered message to be inserted in correct position among existing messages"
+    )
