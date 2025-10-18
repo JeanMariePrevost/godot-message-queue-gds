@@ -6,16 +6,16 @@ extends RefCounted
 class_name MessageQueue
 
 enum QueueState {
-    NORMAL,  ## Accepts all modifications (enqueue, dequeue, etc.)
-    FROZEN,  ## New enqueues are accepted, but buffered to a separate queue until the queue is unfrozen
-    FROZEN_BLOCKING,  ## New enqueues are dropped
+    OPEN,  ## Accepts all modifications (enqueue, dequeue, etc.)
+    SEALED_BUFFERING,  ## New enqueues are accepted, but buffered to a separate queue until the queue is unsealed
+    SEALED_DROPPING,  ## New enqueues are dropped
 }
 
 ## The internal list of _messages in the queue.
 var _messages: Array[Message]
 
-## The internal list of messages that have been added to the queue while _state == QueueState.FROZEN.
-var _frozen_state_message_buffer: Array[Message]
+## The internal list of messages that have been added to the queue while _state == QueueState.DETACHED.
+var _sealed_state_message_buffer: Array[Message]
 
 ## The internal list of messages "queued to be enqueued"
 ## E.g. messages added through `enqueue_after_ms` or `enqueue_after_frames`
@@ -35,18 +35,18 @@ var allow_duplicates: bool:
             # Re-apply deduplication now since duplicates might have been introduced
             remove_duplicates(true)
 
-## Whether the queue is currently isolate and pushing new enqueues to a buffer or dropping them entirely.
-var _state: QueueState = QueueState.NORMAL
+## Whether the queue is currently seal and pushing new enqueues to a buffer or dropping them entirely.
+var _state: QueueState = QueueState.OPEN
 
-## Whether to warn when a message is dropped from being enqueued while the queue is FROZEN_BLOCKING.
-var warn_on_frozen_blocking_enqueue: bool = true
+## Whether to warn when a message is dropped from being enqueued while the queue is CLOSED.
+var warn_on_sealed_closed_enqueue: bool = true
 
 
 ## Creates a new empty MessageQueue.
 func _init() -> void:
     _messages = []
     _scheduled_messages = []
-    _frozen_state_message_buffer = []
+    _sealed_state_message_buffer = []
     Engine.get_main_loop().process_frame.connect(_on_process_frame)
 
 
@@ -71,13 +71,15 @@ func _process_scheduled_messages() -> void:
 
 
 ## Enqueue a message to the back of the queue.
+## If the queue is DETACHED, the message is buffered to a separate queue until the queue is OPEN.
+## If the queue is CLOSED, the message will be dropped.
 func enqueue(new_message: Message) -> void:
-    if _state == QueueState.FROZEN:
-        _frozen_state_message_buffer.append(new_message)
+    if _state == QueueState.SEALED_BUFFERING:
+        _sealed_state_message_buffer.append(new_message)
         return
-    if _state == QueueState.FROZEN_BLOCKING:
-        if warn_on_frozen_blocking_enqueue:
-            push_warning("Tried to enqueue a message while the queue is FROZEN_BLOCKING. Message was dropped. Message: ", new_message.id)
+    if _state == QueueState.SEALED_DROPPING:
+        if warn_on_sealed_closed_enqueue:
+            push_warning("Tried to enqueue a message while the queue is CLOSED. Message was dropped. Message: ", new_message.id)
         return
 
     var m_stage: int = new_message.stage
@@ -265,30 +267,30 @@ func has_scheduled_message(id: String) -> bool:
     return false
 
 
-## Freezes the queue, preventing new enqueues until it is unfrozen.
+## Isolates the queue by buffering new enqueues separately until the queue is re-opened.
 ## The queue can still be dequeued from.
-## For example, if you want to process all messages received in the last frame, you can freeze, drain the queue, and then unfreeze to prevent reentrancy.
-## Messages can still be scheduled, but will not be enqueued until the queue is unfrozen.
-func freeze() -> void:
-    _state = QueueState.FROZEN
+## For example, if you want to process all messages received in the last frame, you can seal, process the queue, and then reopen.
+## Messages can still be scheduled, but will not be enqueued until the queue is reopened.
+func seal() -> void:
+    _state = QueueState.SEALED_BUFFERING
 
 
-## Like `freeze()`, but drops all new enqueues instead of buffering them.
-## Mssages can still be scheduled, but will be dropped if they are due to be enqueued while in this _state.
-func freeze_blocking() -> void:
-    _state = QueueState.FROZEN_BLOCKING
+## Like `seal()`, but drops all new enqueues instead of buffering them.
+## Messages can still be scheduled, but will be dropped if they are due to be enqueued while in this state.
+func seal_closed() -> void:
+    _state = QueueState.SEALED_DROPPING
 
 
-## Unfreezes the queue, allowing new enqueues to be processed normally.
-## This is the default _state.
-func unfreeze() -> void:
-    _state = QueueState.NORMAL
+## Reopens the queue, allowing new enqueues to be processed normally.
+## This is the default state.
+func unseal() -> void:
+    _state = QueueState.OPEN
 
     ## Now try to enqueue all the buffered messages
-    for message in _frozen_state_message_buffer:
+    for message in _sealed_state_message_buffer:
         enqueue(message)
 
-    _frozen_state_message_buffer.clear()
+    _sealed_state_message_buffer.clear()
 
     # And also check if any scheduled messages are due to be enqueued
     _process_scheduled_messages()

@@ -14,7 +14,7 @@ It supports double-buffering, delayed scheduling (e.g. add an action for the nex
 
 
 ## Features
-- **Buffered processing** - freeze the queue while draining to prevent reentrancy and loops.
+- **Buffered processing** - seal the queue while draining to prevent reentrancy and loops.
 - **Message scheduling** - schedule messages to be enqueued after a delay in real time or frame count.
 - **Automatic sorting** - by priority and/or stage.
 - **Deduplication** - optional prevention of duplicate messages.
@@ -207,17 +207,17 @@ queue.dequeue()  # Would return the "next_turn" message, added after 1 frame
 queue.dequeue()  # Would return the "explosion" message, added after 1000 ms
 ```
 
-### Freeze/Unfreeze (Double Buffering)
+### Seal/Unseal ("Double Buffering")
 
-If you wish to prevent changes in the queue or issues with reentrancy and potential loops, you can `freeze()` the queue during processing. 
+If you wish to prevent changes in the queue or issues with reentrancy and potential loops, you can `seal()` the queue during processing.  
 
 This prevents new message from being added to the queue, either by buffering them until processing is complete, or by dropping them entirely:
 
 ```gdscript
 queue.enqueue(Message.new("i_will_be_processed"))
 
-# Freeze the queue, moving all subsequent enqueue calls to a separate buffer
-queue.freeze()
+# Isolate the queue, moving all subsequent enqueue calls to a separate buffer
+queue.seal()
 
 queue.enqueue(Message.new("i_will_be_buffered"))
 
@@ -226,20 +226,20 @@ while not queue.is_empty():
     var msg := queue.dequeue()
     print(msg.id)  # We will only see "i_will_be_processed"
 
-# Unfreeze - buffered messages are now enqueued
-queue.unfreeze()
+# Reopen and merge - buffered messages are now enqueued
+queue.unseal()
 
 # At this point, "i_will_be_buffered" is now in the queue
 ```
 
-Using freeze_blocking completely blocks new enqueue calls by dropping the messages instead of buffering:
+Using seal_closed completely blocks new enqueue calls by dropping the messages instead of buffering:
 
 ```gdscript
-queue.freeze_blocking()  # No new enqueues processed
+queue.seal_closed()  # No new enqueues processed
 
-queue.enqueue(Message.new("dropped"))  # Silently dropped
+queue.enqueue(Message.new("will_be_dropped"))  # Silently dropped
 
-queue.unfreeze()  # Returns to normal
+queue.unseal()  # Returns to normal
 ```
 
 ### Removal Operations

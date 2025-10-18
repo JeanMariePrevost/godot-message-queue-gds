@@ -1709,51 +1709,50 @@ func test_remove_delayed_messages_nonexistent_id() -> GDTestResult:
 
 
 # =============================================================================
-# Freeze/Unfreeze Tests
+# Seal/Unseal Tests
 # =============================================================================
 
 
-func test_freeze_buffers_new_enqueues() -> GDTestResult:
+func test_seal_buffers_new_enqueues() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
-    queue.enqueue(Message.new("before_freeze"))
-    queue.freeze()
-    queue.enqueue(Message.new("during_freeze1"))
-    queue.enqueue(Message.new("during_freeze2"))
+    queue.enqueue(Message.new("before_seal"))
+    queue.seal()
+    queue.enqueue(Message.new("during_seal1"))
+    queue.enqueue(Message.new("during_seal2"))
 
     return assert_true(
-        queue.size() == 1 and queue.has_message("before_freeze") and not queue.has_message("during_freeze1"),
-        "Expected frozen queue to buffer new enqueues, not add them to main queue"
+        queue.size() == 1 and queue.has_message("before_seal") and not queue.has_message("during_seal1"), "Expected sealed queue to buffer new enqueues, not add them to main queue"
     )
 
 
-func test_unfreeze_enqueues_buffer() -> GDTestResult:
+func test_unseal_enqueues_buffer() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
-    queue.freeze()
+    queue.seal()
     queue.enqueue(Message.new("buffered1"))
     queue.enqueue(Message.new("buffered2"))
-    queue.unfreeze()
+    queue.unseal()
 
     return assert_true(queue.size() == 2 and queue.has_message("buffered1") and queue.has_message("buffered2"), "Expected unfreezing to enqueue all buffered messages")
 
 
-func test_freeze_allows_dequeue() -> GDTestResult:
+func test_seal_allows_dequeue() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
     queue.enqueue(Message.new("msg1"))
     queue.enqueue(Message.new("msg2"))
-    queue.freeze()
+    queue.seal()
 
     var dequeued: Message = queue.dequeue()
 
-    return assert_true(dequeued != null and dequeued.id == "msg1" and queue.size() == 1, "Expected frozen queue to still allow dequeue operations")
+    return assert_true(dequeued != null and dequeued.id == "msg1" and queue.size() == 1, "Expected sealed queue to still allow dequeue operations")
 
 
-func test_freeze_delayed_messages_scheduled_but_not_enqueued() -> GDTestResult:
+func test_seal_delayed_messages_scheduled_but_not_enqueued() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
-    queue.freeze()
+    queue.seal()
     queue.enqueue_after_ms(Message.new("delayed"), 50)
 
     # Verify it's in delayed messages
@@ -1766,13 +1765,13 @@ func test_freeze_delayed_messages_scheduled_but_not_enqueued() -> GDTestResult:
         await Engine.get_main_loop().process_frame
 
     # Should be buffered, not in main queue
-    return assert_true(queue.is_empty() and not queue.has_message("delayed"), "Expected delayed message that became due during freeze to be buffered, not enqueued")
+    return assert_true(queue.is_empty() and not queue.has_message("delayed"), "Expected delayed message that became due while sealed to be buffered, not enqueued")
 
 
-func test_unfreeze_processes_delayed_messages() -> GDTestResult:
+func test_unseal_processes_delayed_messages() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
-    queue.freeze()
+    queue.seal()
     queue.enqueue_after_ms(Message.new("delayed"), 50)
 
     # Wait for it to become due
@@ -1780,15 +1779,15 @@ func test_unfreeze_processes_delayed_messages() -> GDTestResult:
     while Time.get_ticks_msec() - start_time < 100:
         await Engine.get_main_loop().process_frame
 
-    queue.unfreeze()
+    queue.unseal()
 
-    return assert_true(queue.has_message("delayed"), "Expected unfreezing to process delayed messages that became due")
+    return assert_true(queue.has_message("delayed"), "Expected unsealing to process delayed messages that became due")
 
 
-func test_freeze_respects_priority_on_unfreeze() -> GDTestResult:
+func test_seal_respects_priority_on_unseal() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
-    queue.freeze()
+    queue.seal()
 
     var low: Message = Message.new("low")
     low.priority = 1
@@ -1803,19 +1802,19 @@ func test_freeze_respects_priority_on_unfreeze() -> GDTestResult:
     queue.enqueue(high)
     queue.enqueue(mid)
 
-    queue.unfreeze()
+    queue.unseal()
 
     var first: Message = queue.dequeue()
     var second: Message = queue.dequeue()
     var third: Message = queue.dequeue()
 
-    return assert_true(first.id == "high" and second.id == "mid" and third.id == "low", "Expected buffered messages to respect priority ordering when unfrozen")
+    return assert_true(first.id == "high" and second.id == "mid" and third.id == "low", "Expected buffered messages to respect priority ordering when unsealed")
 
 
-func test_freeze_respects_stage_on_unfreeze() -> GDTestResult:
+func test_seal_respects_stage_on_unseal() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
-    queue.freeze()
+    queue.seal()
 
     var stage2: Message = Message.new("stage2")
     stage2.stage = 2
@@ -1830,32 +1829,32 @@ func test_freeze_respects_stage_on_unfreeze() -> GDTestResult:
     queue.enqueue(stage0)
     queue.enqueue(stage1)
 
-    queue.unfreeze()
+    queue.unseal()
 
     var first: Message = queue.dequeue()
     var second: Message = queue.dequeue()
     var third: Message = queue.dequeue()
 
-    return assert_true(first.id == "stage0" and second.id == "stage1" and third.id == "stage2", "Expected buffered messages to respect stage ordering when unfrozen")
+    return assert_true(first.id == "stage0" and second.id == "stage1" and third.id == "stage2", "Expected buffered messages to respect stage ordering when unsealed")
 
 
-func test_freeze_blocking_drops_new_enqueues() -> GDTestResult:
+func test_seal_blocking_drops_new_enqueues() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.warn_on_frozen_blocking_enqueue = false  # Disable warnings for test
+    queue.warn_on_sealed_closed_enqueue = false  # Disable warnings for test
 
-    queue.enqueue(Message.new("before_freeze"))
-    queue.freeze_blocking()
+    queue.enqueue(Message.new("before_seal"))
+    queue.seal_closed()
     queue.enqueue(Message.new("dropped1"))
     queue.enqueue(Message.new("dropped2"))
 
-    return assert_true(queue.size() == 1 and queue.has_message("before_freeze") and not queue.has_message("dropped1"), "Expected FROZEN_BLOCKING to drop new enqueues")
+    return assert_true(queue.size() == 1 and queue.has_message("before_seal") and not queue.has_message("dropped1"), "Expected CLOSED to drop new enqueues")
 
 
-func test_freeze_blocking_drops_delayed_messages_when_due() -> GDTestResult:
+func test_seal_blocking_drops_delayed_messages_when_due() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.warn_on_frozen_blocking_enqueue = false
+    queue.warn_on_sealed_closed_enqueue = false
 
-    queue.freeze_blocking()
+    queue.seal_closed()
     queue.enqueue_after_ms(Message.new("delayed"), 50)
 
     # Wait for it to become due
@@ -1863,90 +1862,90 @@ func test_freeze_blocking_drops_delayed_messages_when_due() -> GDTestResult:
     while Time.get_ticks_msec() - start_time < 100:
         await Engine.get_main_loop().process_frame
 
-    return assert_true(queue.is_empty(), "Expected FROZEN_BLOCKING to drop delayed messages that became due")
+    return assert_true(queue.is_empty(), "Expected CLOSED to drop delayed messages that became due")
 
 
-func test_freeze_blocking_allows_dequeue() -> GDTestResult:
+func test_seal_blocking_allows_dequeue() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.warn_on_frozen_blocking_enqueue = false
+    queue.warn_on_sealed_closed_enqueue = false
 
     queue.enqueue(Message.new("msg1"))
     queue.enqueue(Message.new("msg2"))
-    queue.freeze_blocking()
+    queue.seal_closed()
 
     var dequeued: Message = queue.dequeue()
 
-    return assert_true(dequeued != null and dequeued.id == "msg1" and queue.size() == 1, "Expected FROZEN_BLOCKING queue to still allow dequeue operations")
+    return assert_true(dequeued != null and dequeued.id == "msg1" and queue.size() == 1, "Expected CLOSED queue to still allow dequeue operations")
 
 
-func test_freeze_blocking_unfreeze_has_empty_buffer() -> GDTestResult:
+func test_seal_blocking_unseal_has_empty_buffer() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.warn_on_frozen_blocking_enqueue = false
+    queue.warn_on_sealed_closed_enqueue = false
 
-    queue.freeze_blocking()
+    queue.seal_closed()
     queue.enqueue(Message.new("dropped"))
-    queue.unfreeze()
+    queue.unseal()
 
-    return assert_true(queue.is_empty(), "Expected unfreezing after FROZEN_BLOCKING to not enqueue anything")
+    return assert_true(queue.is_empty(), "Expected unsealing after CLOSED to not enqueue anything")
 
 
-func test_multiple_freeze_unfreeze_cycles() -> GDTestResult:
+func test_multiple_seal_unseal_cycles() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
     # First cycle
-    queue.freeze()
+    queue.seal()
     queue.enqueue(Message.new("cycle1_msg1"))
     queue.enqueue(Message.new("cycle1_msg2"))
-    queue.unfreeze()
+    queue.unseal()
 
     if queue.size() != 2:
-        return fail_test("Expected 2 messages after first unfreeze, got " + str(queue.size()))
+        return fail_test("Expected 2 messages after first unseal, got " + str(queue.size()))
 
     # Second cycle
-    queue.freeze()
+    queue.seal()
     queue.enqueue(Message.new("cycle2_msg1"))
     queue.enqueue(Message.new("cycle2_msg2"))
-    queue.unfreeze()
+    queue.unseal()
 
-    return assert_equal(4, queue.size(), "Expected 4 messages after two freeze/unfreeze cycles")
+    return assert_equal(4, queue.size(), "Expected 4 messages after two seal/unseal cycles")
 
 
-func test_freeze_then_freeze_blocking() -> GDTestResult:
+func test_seal_then_seal_blocking() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.warn_on_frozen_blocking_enqueue = false
+    queue.warn_on_sealed_closed_enqueue = false
 
-    queue.freeze()
+    queue.seal()
     queue.enqueue(Message.new("buffered"))
 
-    queue.freeze_blocking()
+    queue.seal_closed()
     queue.enqueue(Message.new("dropped"))
 
-    queue.unfreeze()
+    queue.unseal()
 
     return assert_true(
         queue.size() == 1 and queue.has_message("buffered") and not queue.has_message("dropped"),
-        "Expected transition from FROZEN to FROZEN_BLOCKING to clear buffer and drop new messages"
+        "Expected transition from SEALED_BUFFERING to SEALED_DROPPING to clear buffer and drop new messages"
     )
 
 
-func test_freeze_with_no_duplicates() -> GDTestResult:
+func test_seal_with_no_duplicates() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
     queue.allow_duplicates = false
 
-    queue.freeze()
+    queue.seal()
     queue.enqueue(Message.new("duplicate"))
     queue.enqueue(Message.new("duplicate"))
     queue.enqueue(Message.new("duplicate"))
-    queue.unfreeze()
+    queue.unseal()
 
-    return assert_equal(1, queue.size(), "Expected deduplication to work with frozen buffer on unfreeze")
+    return assert_equal(1, queue.size(), "Expected deduplication to work with sealed buffer on unseal")
 
 
-func test_freeze_clear_does_not_affect_buffer() -> GDTestResult:
+func test_seal_clear_does_not_affect_buffer() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
     queue.enqueue(Message.new("in_queue"))
-    queue.freeze()
+    queue.seal()
     queue.enqueue(Message.new("buffered"))
 
     queue.clear()
@@ -1954,12 +1953,12 @@ func test_freeze_clear_does_not_affect_buffer() -> GDTestResult:
     if not queue.is_empty():
         return fail_test("Expected main queue to be cleared")
 
-    queue.unfreeze()
+    queue.unseal()
 
-    return assert_true(queue.size() == 1 and queue.has_message("buffered"), "Expected clear() to not affect frozen buffer")
+    return assert_true(queue.size() == 1 and queue.has_message("buffered"), "Expected clear() to not affect sealed buffer")
 
 
-func test_freeze_mixed_with_existing_messages() -> GDTestResult:
+func test_seal_mixed_with_existing_messages() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
     var existing1: Message = Message.new("existing1")
@@ -1971,23 +1970,23 @@ func test_freeze_mixed_with_existing_messages() -> GDTestResult:
     queue.enqueue(existing1)
     queue.enqueue(existing2)
 
-    queue.freeze()
+    queue.seal()
 
     var buffered: Message = Message.new("buffered")
     buffered.priority = 10
 
     queue.enqueue(buffered)
-    queue.unfreeze()
+    queue.unseal()
 
     var first: Message = queue.dequeue()
 
-    return assert_equal("buffered", first.id, "Expected unfrozen buffered message to be inserted in correct priority order")
+    return assert_equal("buffered", first.id, "Expected buffered message to be inserted in correct priority order")
 
 
-func test_freeze_with_delayed_and_buffer() -> GDTestResult:
+func test_seal_with_delayed_and_buffer() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
-    queue.freeze()
+    queue.seal()
     queue.enqueue(Message.new("buffered"))
     queue.enqueue_after_ms(Message.new("delayed"), 50)
 
@@ -1996,20 +1995,18 @@ func test_freeze_with_delayed_and_buffer() -> GDTestResult:
     while Time.get_ticks_msec() - start_time < 100:
         await Engine.get_main_loop().process_frame
 
-    queue.unfreeze()
+    queue.unseal()
 
-    return assert_true(
-        queue.size() == 2 and queue.has_message("buffered") and queue.has_message("delayed"), "Expected both buffered and delayed messages to be enqueued on unfreeze"
-    )
+    return assert_true(queue.size() == 2 and queue.has_message("buffered") and queue.has_message("delayed"), "Expected both buffered and delayed messages to be enqueued on unseal")
 
 
-func test_freeze_dequeue_all_then_unfreeze() -> GDTestResult:
+func test_seal_dequeue_all_then_unseal() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
     queue.enqueue(Message.new("msg1"))
     queue.enqueue(Message.new("msg2"))
 
-    queue.freeze()
+    queue.seal()
     queue.enqueue(Message.new("buffered"))
 
     # Dequeue all from main queue
@@ -2019,15 +2016,15 @@ func test_freeze_dequeue_all_then_unfreeze() -> GDTestResult:
     if not queue.is_empty():
         return fail_test("Expected main queue to be empty after dequeuing all")
 
-    queue.unfreeze()
+    queue.unseal()
 
     return assert_true(queue.size() == 1 and queue.has_message("buffered"), "Expected buffer to be enqueued after dequeuing all main queue messages")
 
 
-func test_freeze_state_persists_across_frames() -> GDTestResult:
+func test_seal_state_persists_across_frames() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
-    queue.freeze()
+    queue.seal()
     queue.enqueue(Message.new("buffered1"))
 
     await Engine.get_main_loop().process_frame
@@ -2036,29 +2033,29 @@ func test_freeze_state_persists_across_frames() -> GDTestResult:
 
     await Engine.get_main_loop().process_frame
 
-    return assert_true(queue.is_empty(), "Expected freeze state to persist across multiple frames")
+    return assert_true(queue.is_empty(), "Expected sealed state to persist across multiple frames")
 
 
-func test_unfreeze_with_empty_buffer() -> GDTestResult:
+func test_unseal_with_empty_buffer() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
-    queue.freeze()
-    queue.unfreeze()
+    queue.seal()
+    queue.unseal()
 
     return assert_true(queue.is_empty(), "Expected unfreezing with empty buffer to not cause issues")
 
 
-func test_freeze_blocking_allows_delayed_scheduling() -> GDTestResult:
+func test_seal_blocking_allows_delayed_scheduling() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.warn_on_frozen_blocking_enqueue = false
+    queue.warn_on_sealed_closed_enqueue = false
 
-    queue.freeze_blocking()
+    queue.seal_closed()
     queue.enqueue_after_ms(Message.new("delayed"), 100)
 
-    return assert_true(queue.has_scheduled_message("delayed"), "Expected FROZEN_BLOCKING to still allow scheduling delayed messages")
+    return assert_true(queue.has_scheduled_message("delayed"), "Expected CLOSED to still allow scheduling delayed messages")
 
 
-func test_freeze_respects_deduplication_policy_never() -> GDTestResult:
+func test_seal_respects_deduplication_policy_never() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
     queue.allow_duplicates = true
 
@@ -2068,161 +2065,161 @@ func test_freeze_respects_deduplication_policy_never() -> GDTestResult:
     var msg2: Message = Message.new("id")
     msg2.allow_duplicates = Message.DuplicatePolicy.FORCE_ALLOW_DUPLICATES
 
-    queue.freeze()
+    queue.seal()
     queue.enqueue(msg1)
     queue.enqueue(msg2)
-    queue.unfreeze()
+    queue.unseal()
 
-    return assert_equal(2, queue.size(), "Expected NEVER policy to allow duplicates even in frozen buffer")
+    return assert_equal(2, queue.size(), "Expected NEVER policy to allow duplicates even in sealed buffer")
 
 
 # =============================================================================
-# Freeze/Unfreeze Buffer Introspection Tests
+# Seal/Unseal Buffer Introspection Tests
 # =============================================================================
 
 
-func test_freeze_buffer_introspection() -> GDTestResult:
+func test_seal_buffer_introspection() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
-    queue.freeze()
+    queue.seal()
     queue.enqueue(Message.new("buffered1"))
     queue.enqueue(Message.new("buffered2"))
     queue.enqueue(Message.new("buffered3"))
 
-    return assert_true(queue._frozen_state_message_buffer.size() == 3 and queue.is_empty(), "Expected 3 messages in buffer and 0 in main queue")
+    return assert_true(queue._sealed_state_message_buffer.size() == 3 and queue.is_empty(), "Expected 3 messages in buffer and 0 in main queue")
 
 
-func test_freeze_buffer_cleared_on_unfreeze() -> GDTestResult:
+func test_seal_buffer_cleared_on_unseal() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
-    queue.freeze()
+    queue.seal()
     queue.enqueue(Message.new("buffered"))
 
-    if queue._frozen_state_message_buffer.size() != 1:
+    if queue._sealed_state_message_buffer.size() != 1:
         return fail_test("Expected 1 message in buffer")
 
-    queue.unfreeze()
+    queue.unseal()
 
-    return assert_equal(0, queue._frozen_state_message_buffer.size(), "Expected buffer to be cleared after unfreeze")
+    return assert_equal(0, queue._sealed_state_message_buffer.size(), "Expected buffer to be cleared after unseal")
 
 
-func test_freeze_buffer_vs_main_queue_separation() -> GDTestResult:
+func test_seal_buffer_vs_main_queue_separation() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
     queue.enqueue(Message.new("in_main"))
-    queue.freeze()
+    queue.seal()
     queue.enqueue(Message.new("in_buffer"))
 
     return assert_true(
-        queue.size() == 1 and queue._frozen_state_message_buffer.size() == 1 and queue.has_message("in_main") and not queue.has_message("in_buffer"),
+        queue.size() == 1 and queue._sealed_state_message_buffer.size() == 1 and queue.has_message("in_main") and not queue.has_message("in_buffer"),
         "Expected clear separation between main queue and buffer"
     )
 
 
 # =============================================================================
-# Freeze/Unfreeze Invalid Operations & Edge Cases
+# Seal/Unseal Invalid Operations & Edge Cases
 # =============================================================================
 
 
-func test_double_freeze_does_not_duplicate_state() -> GDTestResult:
+func test_double_seal_does_not_duplicate_state() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
-    queue.freeze()
+    queue.seal()
     queue.enqueue(Message.new("msg1"))
-    queue.freeze()  # Second freeze
+    queue.seal()  # Second seal
     queue.enqueue(Message.new("msg2"))
 
-    if queue._frozen_state_message_buffer.size() != 2:
-        return fail_test("Expected 2 messages in buffer, got " + str(queue._frozen_state_message_buffer.size()))
+    if queue._sealed_state_message_buffer.size() != 2:
+        return fail_test("Expected 2 messages in buffer, got " + str(queue._sealed_state_message_buffer.size()))
 
-    queue.unfreeze()
+    queue.unseal()
 
-    return assert_equal(2, queue.size(), "Expected double freeze to not corrupt state")
+    return assert_equal(2, queue.size(), "Expected double seal to not corrupt state")
 
 
-func test_unfreeze_without_freeze_is_noop() -> GDTestResult:
+func test_unseal_without_seal_is_noop() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
     queue.enqueue(Message.new("msg1"))
-    queue.unfreeze()  # Unfreeze without freeze
+    queue.unseal()  # Unseal without seal
 
-    return assert_true(queue.size() == 1 and queue.has_message("msg1"), "Expected unfreeze without freeze to not affect queue")
+    return assert_true(queue.size() == 1 and queue.has_message("msg1"), "Expected unseal without seal to not affect queue")
 
 
-func test_multiple_unfreezes_is_safe() -> GDTestResult:
+func test_multiple_unseals_is_safe() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
-    queue.freeze()
+    queue.seal()
     queue.enqueue(Message.new("buffered"))
-    queue.unfreeze()
-    queue.unfreeze()  # Second unfreeze
-    queue.unfreeze()  # Third unfreeze
+    queue.unseal()
+    queue.unseal()  # Second unseal
+    queue.unseal()  # Third unseal
 
-    return assert_equal(1, queue.size(), "Expected multiple unfreezes to be safe")
+    return assert_equal(1, queue.size(), "Expected multiple unseals to be safe")
 
 
-func test_freeze_enqueue_does_not_error() -> GDTestResult:
+func test_seal_enqueue_does_not_error() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
-    queue.freeze()
+    queue.seal()
 
     # These should not raise errors
     queue.enqueue(Message.new("msg1"))
     queue.enqueue(Message.new("msg2"))
     queue.enqueue(Message.new("msg3"))
 
-    return assert_equal(3, queue._frozen_state_message_buffer.size(), "Expected freeze enqueues to work without errors")
+    return assert_equal(3, queue._sealed_state_message_buffer.size(), "Expected seal enqueues to work without errors")
 
 
-func test_freeze_blocking_enqueue_does_not_error() -> GDTestResult:
+func test_seal_blocking_enqueue_does_not_error() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.warn_on_frozen_blocking_enqueue = false
+    queue.warn_on_sealed_closed_enqueue = false
 
-    queue.freeze_blocking()
+    queue.seal_closed()
 
     # These should not raise errors, just drop silently
     queue.enqueue(Message.new("dropped1"))
     queue.enqueue(Message.new("dropped2"))
     queue.enqueue(Message.new("dropped3"))
 
-    return assert_true(queue.is_empty(), "Expected FROZEN_BLOCKING enqueues to not error")
+    return assert_true(queue.is_empty(), "Expected CLOSED enqueues to not error")
 
 
-func test_freeze_state_transitions() -> GDTestResult:
+func test_seal_state_transitions() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.warn_on_frozen_blocking_enqueue = false
+    queue.warn_on_sealed_closed_enqueue = false
 
-    # NORMAL -> FROZEN -> NORMAL
-    queue.freeze()
+    # OPEN -> DETACHED -> OPEN
+    queue.seal()
     queue.enqueue(Message.new("buffered1"))
-    queue.unfreeze()
+    queue.unseal()
 
-    # NORMAL -> FROZEN_BLOCKING -> NORMAL
-    queue.freeze_blocking()
+    # OPEN -> CLOSED -> OPEN
+    queue.seal_closed()
     queue.enqueue(Message.new("dropped"))
-    queue.unfreeze()
+    queue.unseal()
 
-    # NORMAL -> FROZEN -> FROZEN_BLOCKING -> NORMAL
-    queue.freeze()
+    # OPEN -> DETACHED -> CLOSED -> OPEN
+    queue.seal()
     queue.enqueue(Message.new("buffered2"))
-    queue.freeze_blocking()
+    queue.seal_closed()
     queue.enqueue(Message.new("also_dropped"))
-    queue.unfreeze()
+    queue.unseal()
 
-    # When transitioning FROZEN -> FROZEN_BLOCKING, the buffer is preserved
+    # When transitioning DETACHED -> CLOSED, the buffer is preserved
     # So we should have buffered1 and buffered2
-    return assert_equal(2, queue.size(), "Expected state transitions to preserve buffer when going FROZEN -> FROZEN_BLOCKING")
+    return assert_equal(2, queue.size(), "Expected state transitions to preserve buffer when going DETACHED -> CLOSED")
 
 
 # =============================================================================
-# Freeze/Unfreeze Buffer vs Delayed Message Merge Order Tests
+# Seal/Unseal Buffer vs Delayed Message Merge Order Tests
 # =============================================================================
 
 
 func test_buffer_and_delayed_merge_order_same_priority() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
-    queue.freeze()
+    queue.seal()
 
     var buffered: Message = Message.new("buffered")
     buffered.priority = 5
@@ -2238,19 +2235,19 @@ func test_buffer_and_delayed_merge_order_same_priority() -> GDTestResult:
     while Time.get_ticks_msec() - start_time < 100:
         await Engine.get_main_loop().process_frame
 
-    queue.unfreeze()
+    queue.unseal()
 
     var first: Message = queue.dequeue()
     var second: Message = queue.dequeue()
 
     # Buffered messages should be processed first (they were added to buffer first)
-    return assert_true(first.id == "buffered" and second.id == "delayed", "Expected buffered messages to be enqueued before delayed messages on unfreeze")
+    return assert_true(first.id == "buffered" and second.id == "delayed", "Expected buffered messages to be enqueued before delayed messages on unseal")
 
 
 func test_buffer_and_delayed_merge_order_different_priorities() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
-    queue.freeze()
+    queue.seal()
 
     var buffered_low: Message = Message.new("buffered_low")
     buffered_low.priority = 1
@@ -2266,7 +2263,7 @@ func test_buffer_and_delayed_merge_order_different_priorities() -> GDTestResult:
     while Time.get_ticks_msec() - start_time < 100:
         await Engine.get_main_loop().process_frame
 
-    queue.unfreeze()
+    queue.unseal()
 
     var first: Message = queue.dequeue()
 
@@ -2276,7 +2273,7 @@ func test_buffer_and_delayed_merge_order_different_priorities() -> GDTestResult:
 func test_buffer_and_delayed_merge_order_different_stages() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
-    queue.freeze()
+    queue.seal()
 
     var buffered_s1: Message = Message.new("buffered_s1")
     buffered_s1.stage = 1
@@ -2292,7 +2289,7 @@ func test_buffer_and_delayed_merge_order_different_stages() -> GDTestResult:
     while Time.get_ticks_msec() - start_time < 100:
         await Engine.get_main_loop().process_frame
 
-    queue.unfreeze()
+    queue.unseal()
 
     var first: Message = queue.dequeue()
 
@@ -2302,7 +2299,7 @@ func test_buffer_and_delayed_merge_order_different_stages() -> GDTestResult:
 func test_multiple_buffered_and_delayed_complex_merge() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
-    queue.freeze()
+    queue.seal()
 
     # Add buffered messages
     var buf1: Message = Message.new("buf_s0_p10")
@@ -2332,7 +2329,7 @@ func test_multiple_buffered_and_delayed_complex_merge() -> GDTestResult:
     while Time.get_ticks_msec() - start_time < 100:
         await Engine.get_main_loop().process_frame
 
-    queue.unfreeze()
+    queue.unseal()
 
     var first: Message = queue.dequeue()
     var second: Message = queue.dequeue()
@@ -2347,7 +2344,7 @@ func test_multiple_buffered_and_delayed_complex_merge() -> GDTestResult:
 
 
 # =============================================================================
-# Freeze/Unfreeze Deduplication & Priority Interaction Tests
+# Seal/Unseal Deduplication & Priority Interaction Tests
 # =============================================================================
 
 
@@ -2355,7 +2352,7 @@ func test_buffered_duplicates_different_priorities_no_duplicates() -> GDTestResu
     var queue: MessageQueue = MessageQueue.new()
     queue.allow_duplicates = false
 
-    queue.freeze()
+    queue.seal()
 
     var low: Message = Message.new("duplicate")
     low.priority = 1
@@ -2373,7 +2370,7 @@ func test_buffered_duplicates_different_priorities_no_duplicates() -> GDTestResu
     queue.enqueue(high)
     queue.enqueue(mid)
 
-    queue.unfreeze()
+    queue.unseal()
 
     if queue.size() != 1:
         return fail_test("Expected deduplication to result in 1 message, got " + str(queue.size()))
@@ -2389,7 +2386,7 @@ func test_buffered_duplicates_different_stages_no_duplicates_respect_order() -> 
     var queue: MessageQueue = MessageQueue.new()
     queue.allow_duplicates = false
 
-    queue.freeze()
+    queue.seal()
 
     var stage2: Message = Message.new("duplicate")
     stage2.stage = 2
@@ -2407,18 +2404,18 @@ func test_buffered_duplicates_different_stages_no_duplicates_respect_order() -> 
     queue.enqueue(stage0)
     queue.enqueue(stage1)
 
-    queue.unfreeze()
+    queue.unseal()
 
     if queue.size() != 1:
         return fail_test("Expected deduplication to result in 1 message, got " + str(queue.size()))
 
     var result: Message = queue.dequeue()
 
-    # Deduplication happens during unfreeze, respecting the enqueue order
+    # Deduplication happens during unseal, respecting the enqueue order
     return assert_equal("duplicate", result.id, "Expected deduplication to work on buffered messages with different stages")
 
 
-func test_freeze_buffer_with_no_duplicates() -> GDTestResult:
+func test_seal_buffer_with_no_duplicates() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
     queue.allow_duplicates = false
 
@@ -2429,15 +2426,15 @@ func test_freeze_buffer_with_no_duplicates() -> GDTestResult:
 
     queue.enqueue(in_main)
 
-    # Freeze and add to buffer
-    queue.freeze()
+    # Seal and add to buffer
+    queue.seal()
 
     var in_buffer: Message = Message.new("duplicate")
     in_buffer.payload = "buffer"
     in_buffer.priority = 10
 
     queue.enqueue(in_buffer)
-    queue.unfreeze()
+    queue.unseal()
 
     # Should still have 1 message (deduplication should prevent buffer message from being added)
     if queue.size() != 1:
@@ -2448,11 +2445,11 @@ func test_freeze_buffer_with_no_duplicates() -> GDTestResult:
     return assert_equal("main", result.payload, "Expected main queue message to be kept when buffer has duplicate")
 
 
-func test_freeze_mixed_policies_in_buffer_no_duplicates() -> GDTestResult:
+func test_seal_mixed_policies_in_buffer_no_duplicates() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
     queue.allow_duplicates = false
 
-    queue.freeze()
+    queue.seal()
 
     var default1: Message = Message.new("dup")
     default1.allow_duplicates = Message.DuplicatePolicy.FOLLOW_QUEUE_POLICY
@@ -2471,103 +2468,101 @@ func test_freeze_mixed_policies_in_buffer_no_duplicates() -> GDTestResult:
     queue.enqueue(never1)
     queue.enqueue(never2)
 
-    queue.unfreeze()
+    queue.unseal()
 
     # Should have 1 DEFAULT + 2 NEVER = 3 messages
     return assert_equal(3, queue.size(), "Expected mixed deduplication policies in buffer to be respected")
 
 
 # =============================================================================
-# Freeze/Unfreeze Additional Edge Cases
+# Seal/Unseal Additional Edge Cases
 # =============================================================================
 
 
-func test_freeze_blocking_then_freeze_buffer_preserved() -> GDTestResult:
+func test_seal_blocking_then_seal_buffer_preserved() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.warn_on_frozen_blocking_enqueue = false
+    queue.warn_on_sealed_closed_enqueue = false
 
-    queue.freeze_blocking()
+    queue.seal_closed()
     queue.enqueue(Message.new("dropped"))
 
-    queue.freeze()
+    queue.seal()
     queue.enqueue(Message.new("buffered"))
 
-    queue.unfreeze()
+    queue.unseal()
 
-    return assert_true(
-        queue.size() == 1 and queue.has_message("buffered") and not queue.has_message("dropped"), "Expected transition from FROZEN_BLOCKING to FROZEN to preserve buffer"
-    )
+    return assert_true(queue.size() == 1 and queue.has_message("buffered") and not queue.has_message("dropped"), "Expected transition from CLOSED to DETACHED to preserve buffer")
 
 
-func test_freeze_with_clear_delayed_and_buffer() -> GDTestResult:
+func test_seal_with_clear_scheduled_messages_and_buffer() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
-    queue.freeze()
+    queue.seal()
     queue.enqueue(Message.new("buffered"))
     queue.enqueue_after_ms(Message.new("delayed"), 50)
 
-    # Clear delayed messages
+    # Clear scheduled messages
     queue.clear_scheduled_messages()
 
-    # Wait to make sure delayed doesn't get enqueued
+    # Wait to make sure scheduled messages don't get enqueued
     var start_time: int = Time.get_ticks_msec()
     while Time.get_ticks_msec() - start_time < 100:
         await Engine.get_main_loop().process_frame
 
-    queue.unfreeze()
+    queue.unseal()
 
     return assert_true(
-        queue.size() == 1 and queue.has_message("buffered") and not queue.has_message("delayed"), "Expected clear_delayed_messages to work correctly with frozen queue"
+        queue.size() == 1 and queue.has_message("buffered") and not queue.has_message("delayed"), "Expected clear_delayed_messages to work correctly with sealed queue"
     )
 
 
-func test_freeze_dequeue_then_buffer_enqueue() -> GDTestResult:
+func test_seal_dequeue_then_buffer_enqueue() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
     var existing: Message = Message.new("existing")
     existing.priority = 5
 
     queue.enqueue(existing)
-    queue.freeze()
+    queue.seal()
 
     var buffered: Message = Message.new("buffered")
     buffered.priority = 10
 
     queue.enqueue(buffered)
 
-    # Dequeue while frozen
+    # Dequeue while sealed
     var dequeued: Message = queue.dequeue()
 
     if dequeued.id != "existing":
         return fail_test("Expected to dequeue existing message")
 
-    queue.unfreeze()
+    queue.unseal()
 
-    return assert_true(queue.size() == 1 and queue.has_message("buffered"), "Expected buffer to be enqueued after dequeuing from frozen queue")
+    return assert_true(queue.size() == 1 and queue.has_message("buffered"), "Expected buffer to be enqueued after dequeuing from sealed queue")
 
 
-func test_freeze_peek_operations_work() -> GDTestResult:
+func test_seal_peek_operations_work() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
     queue.enqueue(Message.new("in_queue"))
-    queue.freeze()
+    queue.seal()
     queue.enqueue(Message.new("buffered"))
 
     var peeked: Message = queue.peek()
 
-    return assert_true(peeked != null and peeked.id == "in_queue" and queue.size() == 1, "Expected peek to work on frozen queue (only sees main queue, not buffer)")
+    return assert_true(peeked != null and peeked.id == "in_queue" and queue.size() == 1, "Expected peek to work on sealed queue (only sees main queue, not buffer)")
 
 
-func test_freeze_has_message_only_checks_main_queue() -> GDTestResult:
+func test_seal_has_message_only_checks_main_queue() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
-    queue.freeze()
+    queue.seal()
     queue.enqueue(Message.new("buffered"))
 
     return assert_false(queue.has_message("buffered"), "Expected has_message to not see buffered messages")
 
 
-func test_unfreeze_buffer_respects_existing_queue_order() -> GDTestResult:
+func test_unseal_buffer_respects_existing_queue_order() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
 
     # Add messages to main queue
@@ -2580,14 +2575,14 @@ func test_unfreeze_buffer_respects_existing_queue_order() -> GDTestResult:
     queue.enqueue(main1)
     queue.enqueue(main2)
 
-    # Freeze and add to buffer
-    queue.freeze()
+    # Seal and add to buffer
+    queue.seal()
 
     var buffered: Message = Message.new("buffered")
     buffered.priority = 5
 
     queue.enqueue(buffered)
-    queue.unfreeze()
+    queue.unseal()
 
     var first: Message = queue.dequeue()
     var second: Message = queue.dequeue()
