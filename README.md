@@ -8,15 +8,15 @@
 ## Overview
 A lightweight message queue for GDScript with a few extra capabilities.
 
-Its main purpose is to act as a **buffer** for collecting events or requests during a frame, then **sorting**, **deduplicating**, and **processing** them safely at the end of that frame.
+Its intended purpose is to act as a **buffer** for collecting events or requests during a frame, then **sorting**, **deduplicating**, and **processing** them safely at the end of that frame.
 
 It supports double-buffering, delayed scheduling (e.g. add an action for the next frame), automatic deduplication, and priority/stage ordering, making it easy to manage complex event dispatching in a deterministic way across frames.
 
 
 ## Features
 - **Buffered processing** - freeze the queue while draining to prevent reentrancy and loops.
-- **Delayed scheduling** - schedule messages to be enqueued after a delay in real time or frame count.
-- **Priority and stage ordering** - automatically sorts on enqueue.
+- **Message scheduling** - schedule messages to be enqueued after a delay in real time or frame count.
+- **Automatic sorting** - by priority and/or stage.
 - **Deduplication** - optional prevention of duplicate messages.
 
 
@@ -58,12 +58,16 @@ print(msg2.payload)  # Prints {"hp": 100, "mp": 72}
 
 ### Ordering: Priority and Stages
 
-Two sorting mechanisms are offered: **priority** and **stages**
+Two sorting mechanisms are offered: **priority** and **stages**.
+
 Higher priority messages are processed first.
-Stages function in reverse (lower values go first) and can be used to _group_ messages, either to prioritize messages against specific messages of the same stage, or to be able to process them as distinct groups or phases, for example during `process_frame`, during `deferred` calls, and at `frame_post_draw`.
+
+Stages function in reverse, with lower values going first, and can be used to _group_ messages, to prioritize messages against specific messages of the same stage, or to be able to process them as distinct  phases.
+
+YOu could for example create phases to be processed during `process_frame`, at the end of the frame during `deferred` calls, and at `frame_post_draw`.
 
 
-#### Priority Ordering
+##### Priority Ordering Example
 
 ```gdscript
 var urgent: Message = Message.new("critical_action")
@@ -90,9 +94,9 @@ queue.dequeue()  # Returns "normal_action" Message (priority 0)
 queue.dequeue()  # Returns "unimportant_action" Message (priority -1)
 ```
 
-#### Stage-Based Ordering
+#### Stage and Priority Example
 
-Stages let you group messages into logical phases (where lower stage = processed first) and apply ordering on top of priority:
+Stage applies on top of priority, and optionally allow you to dequeue messages of a given stage:
 
 ```gdscript
 var default_stage_message: Message = Message.new("default_stage_action")  # Default stage is 0
@@ -109,10 +113,10 @@ second_stage_message2.stage = 2
 second_stage_message2.priority = 5
 
 # Order of insertion will not affect results here either
-queue.enqueue(default_stage_message)
+queue.enqueue(second_stage_message2)
 queue.enqueue(first_stage_message)
 queue.enqueue(second_stage_message1)
-queue.enqueue(second_stage_message2)
+queue.enqueue(default_stage_message)
 
 # Results will be in the order of stage, then priority
 queue.dequeue()  # Returns "default_stage_action" Message (stage 0)
@@ -140,9 +144,9 @@ queue.enqueue(Message.new("update_score"))  # Dropped (duplicate id)
 queue.size()  # Returns 1
 ```
 
-Per-message duplicate control can be used to prevent duplicates for only specific messages, or to _allow_ duplicates for only certain ones.
+Per-message duplicate control can be used to override queue settings and prevent or allow duplicates for specific messages only:
 
-For example we could prevent duplicates globally, except for specific messages:
+For example we could disallow duplicates globally, except for specific messages:
 
 ```gdscript
 queue.allow_duplicates = false  # Prevent duplicates globally
@@ -180,7 +184,7 @@ queue.enqueue(no_dupes_allowed_message2)  # Dropped even though queue.allow_dupl
 
 ### Delayed Enqueues / Message Scheduling
 
-Messages that need to be added now, but not actually be processed until later can be scheduled with "enquued_after_x":
+Messages that need to be added now, but not actually be processed as part of the queue until later can be scheduled with `enqueue_after_ms` and `enqueue_after_frames`:
 
 ```gdscript
 # Schedule after a real-time delay (milliseconds)
@@ -197,11 +201,17 @@ queue.is_scheduled(Message.new("explosion"))  # Returns true
 # And we can remove specific or all scheduled messages
 queue.remove_scheduled_message(Message.new("explosion"))  # Removes the scheduled message
 queue.remove_scheduled_messages()  # Removes all scheduled messages
+
+# Or wait until they are due to be enqueued, at which point they could be handled normally:
+queue.dequeue()  # Would return the "next_turn" message, added after 1 frame
+queue.dequeue()  # Would return the "explosion" message, added after 1000 ms
 ```
 
 ### Freeze/Unfreeze (Double Buffering)
 
-If you wish to prevent changes in the queue or issues with reentrancy and potential loops, you can "freeze" the queue during processing. This prevents new message from being added to the queue, either by buffering them until processing is complete, or by dropping them entirely:
+If you wish to prevent changes in the queue or issues with reentrancy and potential loops, you can `freeze()` the queue during processing. 
+
+This prevents new message from being added to the queue, either by buffering them until processing is complete, or by dropping them entirely:
 
 ```gdscript
 queue.enqueue(Message.new("i_will_be_processed"))
