@@ -10,7 +10,7 @@ func test_message_creation_defaults() -> GDTestResult:
             and message.payload == null
             and message.priority == 0
             and message.stage == 0
-            and message.deduplicate == Message.DuplicatePolicy.DEFAULT
+            and message.allow_duplicates == Message.DuplicatePolicy.FOLLOW_QUEUE_POLICY
         ),
         "Expected message to have correct default properties"
     )
@@ -25,7 +25,7 @@ func test_message_creation_with_payload() -> GDTestResult:
         or message.payload != test_payload
         or message.priority != 0
         or message.stage != 0
-        or message.deduplicate != Message.DuplicatePolicy.DEFAULT
+        or message.allow_duplicates != Message.DuplicatePolicy.FOLLOW_QUEUE_POLICY
     ):
         return fail_test("Message creation failed")
     return assert_true(message.payload.has("test_key") and message.payload["test_key"] == "test_value", "Expected payload to have 'test_key' with value 'test_value'")
@@ -36,7 +36,7 @@ func test_message_creation_with_all_settings() -> GDTestResult:
     var message: Message = Message.new("test_message", test_payload)
     message.priority = 1
     message.stage = 2
-    message.deduplicate = Message.DuplicatePolicy.ALWAYS
+    message.allow_duplicates = Message.DuplicatePolicy.FORCE_NO_DUPLICATES
     return assert_true(
         (
             message != null
@@ -44,7 +44,7 @@ func test_message_creation_with_all_settings() -> GDTestResult:
             and message.payload == test_payload
             and message.priority == 1
             and message.stage == 2
-            and message.deduplicate == Message.DuplicatePolicy.ALWAYS
+            and message.allow_duplicates == Message.DuplicatePolicy.FORCE_NO_DUPLICATES
         ),
         "Expected message to have properties as they were set"
     )

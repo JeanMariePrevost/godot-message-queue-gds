@@ -4,7 +4,7 @@
 extends RefCounted
 class_name Message
 
-enum DuplicatePolicy { DEFAULT, ALWAYS, NEVER }
+enum DuplicatePolicy { FOLLOW_QUEUE_POLICY, FORCE_NO_DUPLICATES, FORCE_ALLOW_DUPLICATES }
 
 ## The "kind of message", the "command" or "action" intended.
 ## E.g. "end_turn", "tutorial_screen_1_3", "game_over"
@@ -27,7 +27,7 @@ var stage: int = 0
 ## DEFAULT follows the queue's deduplication policy.
 ## ALWAYS forces deduplication regardless of the queue's policy.
 ## NEVER disables deduplication regardless of the queue's policy.
-var deduplicate: DuplicatePolicy = DuplicatePolicy.DEFAULT
+var allow_duplicates: DuplicatePolicy = DuplicatePolicy.FOLLOW_QUEUE_POLICY
 
 ## INTERNAL USE ONLY: Defines a timestamp in relative to `Time.get_ticks_msec()` after which the message should be enqueued.
 ## For example, to immediately prepare a message that should only be processed after 1 second.

@@ -81,10 +81,10 @@ func enqueue(new_message: Message) -> void:
 
     var m_stage: int = new_message.stage
     var m_priority: int = new_message.priority
-    var m_deduplicate: Message.DuplicatePolicy = new_message.deduplicate
+    var m_deduplicate: Message.DuplicatePolicy = new_message.allow_duplicates
 
     # Deduplication
-    if m_deduplicate == Message.DuplicatePolicy.ALWAYS or (m_deduplicate == Message.DuplicatePolicy.DEFAULT and not allow_duplicates):
+    if m_deduplicate == Message.DuplicatePolicy.FORCE_NO_DUPLICATES or (m_deduplicate == Message.DuplicatePolicy.FOLLOW_QUEUE_POLICY and not allow_duplicates):
         if has_message(new_message.id):
             return
 
@@ -181,7 +181,7 @@ func remove_duplicates_with_id(id: String, respect_never_policy: bool = false) -
     # First detect if we have any NEVER _messages to keep if we need to respect the policy
     if respect_never_policy:
         for msg in _messages:
-            if msg.id == id and msg.deduplicate == Message.DuplicatePolicy.NEVER:
+            if msg.id == id and msg.allow_duplicates == Message.DuplicatePolicy.FORCE_ALLOW_DUPLICATES:
                 have_nevers_to_keep = true
                 break
 
@@ -194,7 +194,7 @@ func remove_duplicates_with_id(id: String, respect_never_policy: bool = false) -
 
         if respect_never_policy and have_nevers_to_keep:
             # Keep all NEVERs, remove everything else
-            if msg.deduplicate != Message.DuplicatePolicy.NEVER:
+            if msg.allow_duplicates != Message.DuplicatePolicy.FORCE_ALLOW_DUPLICATES:
                 _messages.remove_at(i)
             continue
 
