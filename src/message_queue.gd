@@ -1,6 +1,6 @@
 # MessageQueue.gd
 ## MessageQueue / "Command" queue system that can be used to queue up _messages to be processed in order,
-## pool, allow_duplicates, delay _messages and more.
+## pool, deduplicate, delay _messages and more.
 
 extends RefCounted
 class_name MessageQueue
@@ -21,9 +21,10 @@ var _frozen_state_message_buffer: Array[Message]
 ## E.g. messages added through `enqueue_after_ms` or `enqueue_after_frames`
 var _scheduled_messages: Array[Message]
 
-## Default deduplication policy for _messages in this queue.
-## If false, only 1 message of any given id can exist in the queue at any time.
-## Applies to _messages with `allow_duplicates` set to `DEFAULT`.
+## Default duplicate handling policy for _messages in this queue.
+## If false, only 1 message of any given id can exist in the queue at any time (duplicates are prevented).
+## If true, messages with the same id can coexist in the queue.
+## Applies to _messages with `allow_duplicates` set to `FOLLOW_QUEUE_POLICY`.
 var _allow_duplicates: bool = true
 var allow_duplicates: bool:
     get:
@@ -49,7 +50,7 @@ func _init() -> void:
     Engine.get_main_loop().process_frame.connect(_on_process_frame)
 
 
-## Internally used for dlays and other self-managed features.
+## Internally used for delays and other self-managed features.
 func _on_process_frame() -> void:
     _process_scheduled_messages()
 
@@ -81,10 +82,10 @@ func enqueue(new_message: Message) -> void:
 
     var m_stage: int = new_message.stage
     var m_priority: int = new_message.priority
-    var m_deduplicate: Message.DuplicatePolicy = new_message.allow_duplicates
+    var m_allow_duplicates: Message.DuplicatePolicy = new_message.allow_duplicates
 
-    # Deduplication
-    if m_deduplicate == Message.DuplicatePolicy.FORCE_NO_DUPLICATES or (m_deduplicate == Message.DuplicatePolicy.FOLLOW_QUEUE_POLICY and not allow_duplicates):
+    # Deduplication check
+    if m_allow_duplicates == Message.DuplicatePolicy.FORCE_NO_DUPLICATES or (m_allow_duplicates == Message.DuplicatePolicy.FOLLOW_QUEUE_POLICY and not allow_duplicates):
         if has_message(new_message.id):
             return
 
@@ -158,31 +159,33 @@ func remove_scheduled_messages_with_id(id: String) -> void:
     _scheduled_messages = _scheduled_messages.filter(func(m: Message) -> bool: return m.id != id)
 
 
-## Remove duplicate _messages from the queue, regardless of the deduplication policy.
-## Can optionally respect the "NEVER" deduplication policy set at the message level.
+## Remove duplicate messages from the queue, regardless of the global duplicate policy.
+## Can optionally respect the "FORCE_ALLOW_DUPLICATES" policy set at the message level.
+## If respect_allow_duplicates_policy is true, messages with FORCE_ALLOW_DUPLICATES policy will not be removed.
 ## Does not affect scheduled messages, which technically aren't part of the queue yet.
-func remove_duplicates(respect_never_policy: bool = false) -> void:
+func remove_duplicates(respect_allow_duplicates_policy: bool = false) -> void:
     var seen: Dictionary = {}
     # iterate backwards to safely remove
     for i in range(_messages.size() - 1, -1, -1):
         var msg: Message = _messages[i]
         if seen.has(msg.id):
-            remove_duplicates_with_id(msg.id, respect_never_policy)
+            remove_duplicates_with_id(msg.id, respect_allow_duplicates_policy)
             continue
         seen[msg.id] = true
 
 
-## Remove duplicate _messages with a given id from the queue, regardless of the deduplication policy.
-## Can optionally respect the "NEVER" deduplication policy set at the message level.
+## Remove duplicate _messages with a given id from the queue, regardless of the global duplicate policy.
+## Can optionally respect the "FORCE_ALLOW_DUPLICATES" policy set at the message level.
+## If respect_allow_duplicates_policy is true, messages with FORCE_ALLOW_DUPLICATES policy will not be removed.
 ## Does not affect scheduled messages, which technically aren't part of the queue yet.
-func remove_duplicates_with_id(id: String, respect_never_policy: bool = false) -> void:
-    var have_nevers_to_keep: bool = false
+func remove_duplicates_with_id(id: String, respect_allow_duplicates_policy: bool = false) -> void:
+    var have_force_allow_to_keep: bool = false
 
-    # First detect if we have any NEVER _messages to keep if we need to respect the policy
-    if respect_never_policy:
+    # First detect if we have any FORCE_ALLOW_DUPLICATES _messages to keep if we need to respect the policy
+    if respect_allow_duplicates_policy:
         for msg in _messages:
             if msg.id == id and msg.allow_duplicates == Message.DuplicatePolicy.FORCE_ALLOW_DUPLICATES:
-                have_nevers_to_keep = true
+                have_force_allow_to_keep = true
                 break
 
     # Iterate backwards so we can remove safely
@@ -192,8 +195,8 @@ func remove_duplicates_with_id(id: String, respect_never_policy: bool = false) -
         if msg.id != id:
             continue
 
-        if respect_never_policy and have_nevers_to_keep:
-            # Keep all NEVERs, remove everything else
+        if respect_allow_duplicates_policy and have_force_allow_to_keep:
+            # Keep all FORCE_ALLOW_DUPLICATES, remove everything else
             if msg.allow_duplicates != Message.DuplicatePolicy.FORCE_ALLOW_DUPLICATES:
                 _messages.remove_at(i)
             continue
@@ -287,7 +290,7 @@ func unfreeze() -> void:
 
     _frozen_state_message_buffer.clear()
 
-    # And also check if any delayed messages are due to be enqueued
+    # And also check if any scheduled messages are due to be enqueued
     _process_scheduled_messages()
 
 

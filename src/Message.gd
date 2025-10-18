@@ -23,10 +23,10 @@ var priority: int = 0
 ## E.g. you could use this for intra-frame timing as "process_frame = 0", "deferred = 1", "pre_draw = 2", "post_draw = 3".
 var stage: int = 0
 
-## Whether multiple messages with the same id should be deduplicated.
-## DEFAULT follows the queue's deduplication policy.
-## ALWAYS forces deduplication regardless of the queue's policy.
-## NEVER disables deduplication regardless of the queue's policy.
+## Controls whether duplicate messages with the same id are allowed.
+## FOLLOW_QUEUE_POLICY follows the queue's allow_duplicates setting.
+## FORCE_NO_DUPLICATES prevents duplicates regardless of the queue's policy.
+## FORCE_ALLOW_DUPLICATES allows duplicates regardless of the queue's policy.
 var allow_duplicates: DuplicatePolicy = DuplicatePolicy.FOLLOW_QUEUE_POLICY
 
 ## INTERNAL USE ONLY: Defines a timestamp in relative to `Time.get_ticks_msec()` after which the message should be enqueued.
