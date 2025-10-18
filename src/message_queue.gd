@@ -1,6 +1,6 @@
 # MessageQueue.gd
 ## MessageQueue / "Command" queue system that can be used to queue up _messages to be processed in order,
-## pool, deduplicate, delay _messages and more.
+## pool, allow_duplicates, delay _messages and more.
 
 extends RefCounted
 class_name MessageQueue
@@ -22,15 +22,15 @@ var _frozen_state_message_buffer: Array[Message]
 var _scheduled_messages: Array[Message]
 
 ## Default deduplication policy for _messages in this queue.
-## If true, only 1 message of any given id can exist in the queue at any time.
-## Applies to _messages with `deduplicate` set to `DEFAULT`.
-var _deduplicate: bool = true
-var deduplicate: bool:
+## If false, only 1 message of any given id can exist in the queue at any time.
+## Applies to _messages with `allow_duplicates` set to `DEFAULT`.
+var _allow_duplicates: bool = true
+var allow_duplicates: bool:
     get:
-        return _deduplicate
+        return _allow_duplicates
     set(value):
-        _deduplicate = value
-        if value:
+        _allow_duplicates = value
+        if not _allow_duplicates:
             # Re-apply deduplication now since duplicates might have been introduced
             remove_duplicates(true)
 
@@ -84,7 +84,7 @@ func enqueue(new_message: Message) -> void:
     var m_deduplicate: Message.DuplicatePolicy = new_message.deduplicate
 
     # Deduplication
-    if m_deduplicate == Message.DuplicatePolicy.ALWAYS or (m_deduplicate == Message.DuplicatePolicy.DEFAULT and deduplicate):
+    if m_deduplicate == Message.DuplicatePolicy.ALWAYS or (m_deduplicate == Message.DuplicatePolicy.DEFAULT and not allow_duplicates):
         if has_message(new_message.id):
             return
 

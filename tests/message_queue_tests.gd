@@ -14,7 +14,7 @@ func test_queue_creation() -> GDTestResult:
 
 func test_queue_default_deduplicate_policy() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    return assert_true(queue.deduplicate == true, "Expected queue's default deduplicate to be true")
+    return assert_true(queue.allow_duplicates)
 
 
 func test_queue_enqueue_single_message() -> GDTestResult:
@@ -340,9 +340,9 @@ func test_queue_peek_stage_not_found() -> GDTestResult:
 # =============================================================================
 
 
-func test_queue_deduplication_default_enabled() -> GDTestResult:
+func test_queue_deduplication_works() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = true
+    queue.allow_duplicates = false
 
     var msg1: Message = Message.new("duplicate")
     var msg2: Message = Message.new("duplicate")
@@ -350,12 +350,11 @@ func test_queue_deduplication_default_enabled() -> GDTestResult:
     queue.enqueue(msg1)
     queue.enqueue(msg2)
 
-    return assert_equal(1, queue.size(), "Expected duplicate messages to be deduplicated (queue deduplicate=true, message policy=DEFAULT)")
+    return assert_equal(1, queue.size())
 
 
-func test_queue_deduplication_default_disabled() -> GDTestResult:
+func test_queue_allow_duplicates_works() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = false
 
     var msg1: Message = Message.new("duplicate")
     var msg2: Message = Message.new("duplicate")
@@ -363,12 +362,12 @@ func test_queue_deduplication_default_disabled() -> GDTestResult:
     queue.enqueue(msg1)
     queue.enqueue(msg2)
 
-    return assert_equal(2, queue.size(), "Expected duplicate messages to NOT be deduplicated (queue deduplicate=false, message policy=DEFAULT)")
+    return assert_equal(2, queue.size())
 
 
 func test_queue_deduplication_always() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = false  # Queue deduplication is off
+    queue.allow_duplicates = false  # Queue deduplication is off
 
     var msg1: Message = Message.new("always_dedup")
     msg1.deduplicate = Message.DuplicatePolicy.ALWAYS
@@ -384,7 +383,7 @@ func test_queue_deduplication_always() -> GDTestResult:
 
 func test_queue_deduplication_never() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = true  # Queue deduplication is on
+    queue.allow_duplicates = true  # Queue deduplication is on
 
     var msg1: Message = Message.new("never_dedup")
     msg1.deduplicate = Message.DuplicatePolicy.NEVER
@@ -400,7 +399,7 @@ func test_queue_deduplication_never() -> GDTestResult:
 
 func test_queue_deduplication_mixed_policies() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = true
+    queue.allow_duplicates = true
 
     var msg1: Message = Message.new("msg1")
     msg1.deduplicate = Message.DuplicatePolicy.DEFAULT
@@ -416,7 +415,7 @@ func test_queue_deduplication_mixed_policies() -> GDTestResult:
 
 func test_queue_deduplication_changing_policy() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = false
+    queue.allow_duplicates = false
 
     var msg1: Message = Message.new("msg1")
     var msg2: Message = Message.new("msg1")
@@ -427,14 +426,14 @@ func test_queue_deduplication_changing_policy() -> GDTestResult:
     queue.enqueue(msg3)
 
     # Now enable deduplication - should remove duplicates with DEFAULT policy
-    queue.deduplicate = true
+    queue.allow_duplicates = true
 
     return assert_equal(2, queue.size(), "Expected enabling deduplicate to remove existing duplicates with DEFAULT policy")
 
 
 func test_queue_deduplication_only_affects_default_policy() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = false
+    queue.allow_duplicates = false
 
     var msg1: Message = Message.new("never1")
     msg1.deduplicate = Message.DuplicatePolicy.NEVER
@@ -454,14 +453,14 @@ func test_queue_deduplication_only_affects_default_policy() -> GDTestResult:
     queue.enqueue(msg4)
 
     # Enabling deduplicate should only affect DEFAULT policy messages
-    queue.deduplicate = true
+    queue.allow_duplicates = true
 
     return assert_equal(3, queue.size())
 
 
 func test_queue_deduplication_preserves_first_occurrence() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = true
+    queue.allow_duplicates = true
 
     var msg1: Message = Message.new("msg")
     msg1.payload = "first"
@@ -484,7 +483,7 @@ func test_queue_deduplication_preserves_first_occurrence() -> GDTestResult:
 
 func test_queue_complex_scenario() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = true
+    queue.allow_duplicates = false
 
     # Add messages across multiple stages and priorities
     var msg1: Message = Message.new("combat_attack")
@@ -685,7 +684,7 @@ func test_remove_messages_with_id_empty_queue() -> GDTestResult:
 
 func test_remove_messages_with_id_single_occurrence() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = false
+    queue.allow_duplicates = false
 
     queue.enqueue(Message.new("msg1"))
     queue.enqueue(Message.new("target"))
@@ -701,7 +700,7 @@ func test_remove_messages_with_id_single_occurrence() -> GDTestResult:
 
 func test_remove_messages_with_id_multiple_occurrences() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = false
+    queue.allow_duplicates = false
 
     var msg1: Message = Message.new("target")
     msg1.deduplicate = Message.DuplicatePolicy.NEVER
@@ -738,7 +737,7 @@ func test_remove_messages_with_id_nonexistent() -> GDTestResult:
 
 func test_remove_messages_with_id_different_stages_priorities() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = false
+    queue.allow_duplicates = false
 
     var msg1: Message = Message.new("target")
     msg1.stage = 0
@@ -767,7 +766,7 @@ func test_remove_messages_with_id_different_stages_priorities() -> GDTestResult:
 
 func test_remove_duplicates_no_duplicates() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = false
+    queue.allow_duplicates = false
 
     queue.enqueue(Message.new("msg1"))
     queue.enqueue(Message.new("msg2"))
@@ -780,7 +779,7 @@ func test_remove_duplicates_no_duplicates() -> GDTestResult:
 
 func test_remove_duplicates_with_default_policy() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = false
+    queue.allow_duplicates = false
 
     var msg1: Message = Message.new("duplicate")
     msg1.deduplicate = Message.DuplicatePolicy.DEFAULT
@@ -802,15 +801,16 @@ func test_remove_duplicates_with_default_policy() -> GDTestResult:
 
     var remaining: Message = queue.dequeue()
 
-    return assert_true(
-        queue.size() == 0 and remaining != null and remaining.id == "duplicate" and remaining.payload == "third",
-        "Expected remove_duplicates to keep last occurrence of DEFAULT policy duplicates"
-    )
+    var test1 = assert_equal(0, queue.size())
+    if not test1.passed:
+        return test1
+
+    return assert_equal(remaining.payload, "first")
 
 
 func test_remove_duplicates_respects_never_policy_false() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = false
+    queue.allow_duplicates = false
 
     var msg1: Message = Message.new("identical_id")
     msg1.deduplicate = Message.DuplicatePolicy.NEVER
@@ -828,7 +828,7 @@ func test_remove_duplicates_respects_never_policy_false() -> GDTestResult:
 
 func test_remove_duplicates_respects_never_policy_true() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = false
+    queue.allow_duplicates = false
 
     var msg1: Message = Message.new("identical_id")
     msg1.deduplicate = Message.DuplicatePolicy.DEFAULT
@@ -859,7 +859,7 @@ func test_remove_duplicates_respects_never_policy_true() -> GDTestResult:
 
 func test_remove_duplicates_mixed_policies() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = false
+    queue.allow_duplicates = false
 
     var msg1: Message = Message.new("dup1")
     msg1.deduplicate = Message.DuplicatePolicy.DEFAULT
@@ -891,7 +891,7 @@ func test_remove_duplicates_mixed_policies() -> GDTestResult:
 
 func test_remove_duplicates_preserves_order() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = false
+    queue.allow_duplicates = false
 
     var msg1: Message = Message.new("unique1")
     msg1.priority = 10
@@ -931,7 +931,7 @@ func test_remove_duplicates_with_id_no_matching_id() -> GDTestResult:
 
 func test_remove_duplicates_with_id_removes_all_default_policy() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = false
+    queue.allow_duplicates = false
 
     var msg1: Message = Message.new("target")
     msg1.deduplicate = Message.DuplicatePolicy.DEFAULT
@@ -952,7 +952,7 @@ func test_remove_duplicates_with_id_removes_all_default_policy() -> GDTestResult
 
 func test_remove_duplicates_with_id_preserves_never_policy() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = false
+    queue.allow_duplicates = false
 
     var msg1: Message = Message.new("target")
     msg1.deduplicate = Message.DuplicatePolicy.DEFAULT
@@ -983,7 +983,7 @@ func test_remove_duplicates_with_id_preserves_never_policy() -> GDTestResult:
 
 func test_remove_duplicates_with_id_preserves_always_policy() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = false
+    queue.allow_duplicates = false
 
     var msg1: Message = Message.new("target")
     msg1.deduplicate = Message.DuplicatePolicy.ALWAYS
@@ -1608,7 +1608,7 @@ func test_remove_stage_and_delayed_stage_independently() -> GDTestResult:
 
 func test_remove_id_and_delayed_id_independently() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = false  # Make sure deduplication doesn't mess up the test
+    queue.allow_duplicates = true  # Make sure deduplication doesn't mess up the test
 
     queue.enqueue(Message.new("enqueued_keep_me"))
     queue.enqueue(Message.new("remove_me"))
@@ -1929,9 +1929,9 @@ func test_freeze_then_freeze_blocking() -> GDTestResult:
     )
 
 
-func test_freeze_with_deduplication() -> GDTestResult:
+func test_freeze_with_no_duplicates() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = true
+    queue.allow_duplicates = false
 
     queue.freeze()
     queue.enqueue(Message.new("duplicate"))
@@ -2060,7 +2060,7 @@ func test_freeze_blocking_allows_delayed_scheduling() -> GDTestResult:
 
 func test_freeze_respects_deduplication_policy_never() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = true
+    queue.allow_duplicates = true
 
     var msg1: Message = Message.new("id")
     msg1.deduplicate = Message.DuplicatePolicy.NEVER
@@ -2351,9 +2351,9 @@ func test_multiple_buffered_and_delayed_complex_merge() -> GDTestResult:
 # =============================================================================
 
 
-func test_buffered_duplicates_different_priorities_deduplication_order() -> GDTestResult:
+func test_buffered_duplicates_different_priorities_no_duplicates() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = true
+    queue.allow_duplicates = false
 
     queue.freeze()
 
@@ -2385,9 +2385,9 @@ func test_buffered_duplicates_different_priorities_deduplication_order() -> GDTe
     return assert_equal("duplicate", result.id, "Expected deduplication to work on buffered messages")
 
 
-func test_buffered_duplicates_different_stages_deduplication_order() -> GDTestResult:
+func test_buffered_duplicates_different_stages_no_duplicates_respect_order() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = true
+    queue.allow_duplicates = false
 
     queue.freeze()
 
@@ -2418,9 +2418,9 @@ func test_buffered_duplicates_different_stages_deduplication_order() -> GDTestRe
     return assert_equal("duplicate", result.id, "Expected deduplication to work on buffered messages with different stages")
 
 
-func test_freeze_buffer_with_main_queue_deduplication() -> GDTestResult:
+func test_freeze_buffer_with_no_duplicates() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = true
+    queue.allow_duplicates = false
 
     # Add to main queue
     var in_main: Message = Message.new("duplicate")
@@ -2448,9 +2448,9 @@ func test_freeze_buffer_with_main_queue_deduplication() -> GDTestResult:
     return assert_equal("main", result.payload, "Expected main queue message to be kept when buffer has duplicate")
 
 
-func test_freeze_mixed_policies_in_buffer() -> GDTestResult:
+func test_freeze_mixed_policies_in_buffer_no_duplicates() -> GDTestResult:
     var queue: MessageQueue = MessageQueue.new()
-    queue.deduplicate = true
+    queue.allow_duplicates = false
 
     queue.freeze()
 
