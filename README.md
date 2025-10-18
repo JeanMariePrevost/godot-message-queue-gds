@@ -265,6 +265,12 @@ Simply copy the `addons/lbg.godot.gdscript.messagequeue/` folder into your proje
 
 ---
 
+## Testing
+
+A suite of tests is bundled with the repo, which relies on [GDTest](https://github.com/JeanMariePrevost/godot-gdtest).
+
+---
+
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
