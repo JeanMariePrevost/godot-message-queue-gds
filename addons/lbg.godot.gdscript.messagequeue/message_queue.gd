@@ -121,6 +121,7 @@ func size() -> int:
 
 
 ## True if the queue is empty.
+## Note: does not consider scheduled messages.
 func is_empty() -> bool:
     return _messages.is_empty()
 
